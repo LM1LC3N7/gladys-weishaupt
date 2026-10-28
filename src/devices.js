@@ -110,12 +110,13 @@ const DEVICE_FEATURES = [
     'powerDemand',
   ],
   [F.TEMP_OUTDOOR, temperature, 'outdoor'],
-  [F.TEMP_AIR_INTAKE, temperature, 'airIntake'],
+  [F.TEMP_OUTDOOR_2, temperature, 'outdoor2'],
   [F.TEMP_FLOW, temperature, 'flow'],
   [F.TEMP_RETURN, temperature, 'return'],
-  [F.TEMP_EVAPORATION, temperature, 'evaporation'],
-  [F.TEMP_SUCTION_GAS, temperature, 'suctionGas'],
   [F.TEMP_HYDRAULIC_SWITCH, temperature, 'hydraulicSwitch'],
+  [F.TEMP_REGENERATIVE, temperature, 'regenerative'],
+  [F.TEMP_BUFFER, temperature, 'buffer'],
+  [F.TEMP_TOTAL_FLOW, temperature, 'totalFlow'],
   [F.TEMP_DHW, temperature, 'dhw'],
   [F.TEMP_DHW_TARGET, temperature, 'dhwTarget'],
   [F.DHW_SETPOINT, dhwTarget, 'dhwNormal', true],
@@ -174,16 +175,16 @@ export function parseFeatureId(externalId) {
 }
 
 const DHW_BLOCK = holdingBlock('dhw-setpoints', [
-  [42103, 'temp', 'dhwNormal'],
-  [42104, 'temp', 'dhwSetback'],
+  [42103, 'set', 'dhwNormal'],
+  [42104, 'set', 'dhwSetback'],
 ]);
 
 const roomBlock = (circuit) => {
   const offset = (Number(circuit) - 1) * CIRCUIT_STEP;
   return holdingBlock(`circuit-${circuit}-setpoints`, [
-    [41105 + offset, 'temp', `circuit.${circuit}.comfort`],
-    [41106 + offset, 'temp', `circuit.${circuit}.normal`],
-    [41107 + offset, 'temp', `circuit.${circuit}.setback`],
+    [41105 + offset, 'set', `circuit.${circuit}.comfort`],
+    [41106 + offset, 'set', `circuit.${circuit}.normal`],
+    [41107 + offset, 'set', `circuit.${circuit}.setback`],
   ]);
 };
 
@@ -218,13 +219,15 @@ export function commandOf(role) {
       table: DHW_PUSH,
       writable: Object.values(DHW_PUSH),
       protective: 'off',
+      // The push is a timer that counts down: any running push is one value of before.
+      beforeKey: (value) => (value === 'off' ? value : 'running'),
     };
   }
   if (role === F.DHW_SETPOINT) {
     return {
       kind: 'dhw',
       address: 42103,
-      type: 'temp',
+      type: 'set',
       read: 'dhwNormal',
       block: DHW_BLOCK,
       atLeast: ['dhwSetback'],
@@ -235,7 +238,7 @@ export function commandOf(role) {
     return {
       kind: 'dhw',
       address: 42104,
-      type: 'temp',
+      type: 'set',
       read: 'dhwSetback',
       block: DHW_BLOCK,
       atLeast: [],
@@ -270,7 +273,7 @@ export function commandOf(role) {
       kind: 'room',
       circuit: c,
       address: room[0] + offset,
-      type: 'temp',
+      type: 'set',
       read: entry.value,
       block: roomBlock(c),
       atLeast: room[1],
@@ -315,7 +318,7 @@ export function rolesToBuild({ circuits, seen = new Set(), created = new Set() }
   return roles;
 }
 
-/** The highest hot water setpoint offered: the device's, the configuration's, 65 °C. */
+/** The highest hot water setpoint offered: the configuration's ceiling, 65 °C at most. */
 export const dhwTop = (dhwCap = DHW_CAP.default) => Math.min(BOUNDS.dhw.max, DHW_CAP.max, dhwCap);
 
 /** The Gladys device of the heat pump. */

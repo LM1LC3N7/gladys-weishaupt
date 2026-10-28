@@ -12,15 +12,17 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- Weishaupt heat pumps with a built-in Modbus TCP interface, read over the local network: outdoor,
-  air intake, flow, return, evaporation, suction gas, hydraulic switch and hot water temperatures,
+- Weishaupt heat pumps with a built-in Modbus TCP interface (WAB, WBB, WSB, WGB), read over the
+  local network after Weishaupt's datapoint list 83807301: outdoor 1 and 2, flow, return, hydraulic
+  switch, regenerative, buffer, total flow and hot water temperatures,
   system and heat pump state, fault, error and warning codes, power demand, second heat generator
-  and electric heaters, heating circuits 1 to 5 (mode, party/pause, room setpoints, room
+  and electric heaters, heating circuits 1 to 4 (mode, party/pause, room setpoints, room
   temperature and humidity, flow temperatures).
 - Commands behind "Allow the commands" (off by default): system mode, circuit mode, room setpoints
   (comfort, normal, setback: 16-28 °C), hot water setpoints (5.5 °C to the configured ceiling,
-  60 °C at most) and hot water push, decided on a fresh read, confirmed by a read back, at most 6
-  changes per setting and hour.
+  65 °C at most) and hot water push (5-240 min), decided on a fresh read, confirmed by a read back,
+  at most 6 changes per setting and hour and 20 per day (kept in /data).
 - Standby, a circuit standby and stopping the hot water push never depend on that option; a stop
-  not confirmed is held and sent again until a read shows it, also after a restart.
+  not confirmed is held until a read shows it (never by the time), sent again three times at most
+  per click, also after a restart; a command written just before it never wins over it.
 - "Test the connection" button, docs in English and French, cover image.

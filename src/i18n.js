@@ -34,18 +34,16 @@ export const FEATURE_NAMES = {
   [F.WARNING_CODE]: both('Warning code', 'Code d’avertissement'),
   [F.POWER_DEMAND]: both('Power demand (%)', 'Demande de puissance (%)'),
   [F.TEMP_OUTDOOR]: both('Outdoor temperature', 'Température extérieure'),
-  [F.TEMP_AIR_INTAKE]: both('Air intake temperature', 'Température d’aspiration de l’air'),
+  [F.TEMP_OUTDOOR_2]: both('Outdoor temperature 2', 'Température extérieure 2'),
   [F.TEMP_FLOW]: both('Heat pump flow temperature', 'Température de départ de la PAC'),
   [F.TEMP_RETURN]: both('Heat pump return temperature', 'Température de retour de la PAC'),
-  [F.TEMP_EVAPORATION]: both('Evaporation temperature', 'Température d’évaporation'),
-  [F.TEMP_SUCTION_GAS]: both(
-    'Compressor suction gas temperature',
-    'Température des gaz aspirés du compresseur',
-  ),
   [F.TEMP_HYDRAULIC_SWITCH]: both(
     'Hydraulic switch temperature',
     'Température de la bouteille de découplage',
   ),
+  [F.TEMP_REGENERATIVE]: both('Regenerative temperature', 'Température régénérative'),
+  [F.TEMP_BUFFER]: both('Buffer tank temperature', 'Température du ballon tampon'),
+  [F.TEMP_TOTAL_FLOW]: both('Total flow temperature (B7)', 'Température de départ commune (B7)'),
   [F.TEMP_DHW]: both('Hot water temperature', 'Température de l’eau chaude'),
   [F.TEMP_DHW_TARGET]: both('Hot water target in force', 'Consigne d’eau chaude en cours'),
   [F.DHW_SETPOINT]: both('Hot water setpoint (normal)', 'Consigne d’eau chaude (normale)'),
@@ -203,6 +201,16 @@ export const ERRORS = {
       `Already ${count} changes of this setting in the last hour: the heat pump keeps it in a memory with limited write cycles. Not sent; try again later.`,
       `Déjà ${count} changements de ce réglage dans la dernière heure : la pompe à chaleur le garde dans une mémoire à nombre d’écritures limité. Non envoyée ; réessayez plus tard.`,
     ),
+  quotaDay: (count) =>
+    both(
+      `Already ${count} changes of this setting in the last 24 hours: the heat pump keeps it in a memory with limited write cycles (100,000 in its life). Not sent; try again tomorrow.`,
+      `Déjà ${count} changements de ce réglage dans les dernières 24 heures : la pompe à chaleur le garde dans une mémoire à nombre d’écritures limité (100 000 sur sa vie). Non envoyée ; réessayez demain.`,
+    ),
+  stopNotSent: (reason) =>
+    both(
+      `The heat pump could not be reached (${reason}): stop not sent yet, it is tried again at every check until the heat pump answers.`,
+      `La pompe à chaleur n’a pas pu être jointe (${reason}) : arrêt pas encore envoyé, il est retenté à chaque vérification jusqu’à ce que la pompe réponde.`,
+    ),
   unknownValue: both(
     'The current value could not be read just before: command not sent.',
     'La valeur actuelle n’a pas pu être relue juste avant : commande non envoyée.',
@@ -216,8 +224,8 @@ export const ERRORS = {
     'La configuration a changé entre-temps : non envoyée.',
   ),
   busy: both(
-    'Another command to the heat pump is still running: not sent.',
-    'Une autre commande vers la pompe à chaleur est encore en cours : non envoyée.',
+    '16 commands to the heat pump are already waiting: not sent.',
+    '16 commandes vers la pompe à chaleur attendent déjà : non envoyée.',
   ),
   protectMeanwhile: both(
     'A stop was sent meanwhile: not sent.',

@@ -11,28 +11,28 @@ integration "Weishaupt Modbus", version 1.0.19, commit 891bea3 of
 2026-10-08), by OStrama. MIT License; its `LICENSE` file names the
 copyright holder. Full text below.
 
-Ported in `src/constants.js`, `src/modbus/protocol.js` and `src/model.js`:
-the Modbus TCP register list of the heat pumps with a built-in Modbus TCP
-interface (`hpconst.py`, itself taken from the datapoint list Weishaupt gave
-to its users: system 30001-30006 and 40001, heat pump 33101-33108, hot water
-32101-32102 and 42101-42104, second heat generator 34101-34105, heating
-circuits 31101-31105 and 41101-41107 with 100 registers between two
-circuits), the input/holding split (function 4 for 3xxxx, 3 for 4xxxx,
-write single register for the settings), the address sent as listed, the
-formats (temperatures signed in 0.1 °C with 0x8000 "no sensor" and 0x8001
-"sensor broken", percentages with 0xFFFF unknown), the lists of the states
-and modes, the reads by groups of five registers at most and the bounds of
-the setpoints (room 16-28 °C, hot water 5.5-60 °C, by 0.5 °C, with their
-order comfort >= normal >= setback).
+Ported in `src/constants.js`, `src/modbus/protocol.js` and `src/model.js`
+(each checked against Weishaupt's own datapoint list "Modbus TCP (WWP)"
+83807301, 1/2025-11, which is the reference of the register map): the
+input/holding split (function 4 for 3xxxx, 3 for 4xxxx, write single register
+for the settings), the address sent as listed, the reads by groups of five
+registers at most, the party/pause register of a circuit (41x04, not in
+Weishaupt's list: read apart, optional), its decoding (pause 12 h down to
+0.5 h, automatic, party 0.5 h up to 12 h), and the bounds of the room
+setpoints (16-28 °C by 0.5 °C, with their order comfort >= normal >=
+setback).
 
-Changed: a broken sensor is unknown, never -99.9 °C; the hot water setpoints
-are also capped by the configuration (65 °C at most); every write is decided
-on a fresh read and confirmed by a read back; the writes are limited per hour
+Changed: the formats and special values are Weishaupt's (no sensor, open,
+short, digital states, "no setpoint demand"), never -99.9 °C; the hot water
+setpoints are capped by the configuration (65 °C at most) instead of 60 °C;
+the fault comes from 33102; every write is decided on a fresh read and
+confirmed by a read back; the writes are limited per hour and per day
 (EEPROM); stops (standby, circuit standby, hot water push off) are never held
 back and are held until confirmed. Not ported: the experimental WebIF, the
 heat output computed from a power map ("Kennfeld", WBB 12), the computed
 values (spread, performance factors), the energy statistics (36xxx), the
-inputs/outputs (35xxx, 45xxx) and the read-only settings it shows (4310x).
+inputs/outputs (35xxx, 45xxx), the registers not in Weishaupt's list (33106,
+33107, 34103, 41x01, 41x02, 42101, 42105, 4310x, 4510x) and circuit 5.
 Nothing of its Home Assistant code (entities, coordinator, config flow) is
 used.
 

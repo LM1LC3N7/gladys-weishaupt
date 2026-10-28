@@ -44,9 +44,11 @@ test('discovery: one device, the values read and published, special values left 
   );
   assert.ok(!roles.includes('temperature-room') && roles.includes('circuit-1-temperature-room'));
   const dhw = device.features.find((f) => f.external_id === feature('dhw-setpoint'));
-  assert.equal(dhw.max, 60, 'hot water: 60 °C, the heat pump, below the ceiling of 65 °C');
+  assert.equal(dhw.max, 65, 'hot water: the ceiling of the configuration, 65 °C by default');
   assert.equal(ctx.state('temperature-outdoor').state, 4.5);
-  assert.equal(ctx.state('temperature-evaporation').state, -2.5);
+  assert.equal(ctx.state('temperature-outdoor-2').state, 5.1);
+  assert.equal(ctx.state('temperature-buffer').state, -2.5);
+  assert.equal(ctx.state('temperature-regenerative'), undefined, 'no sensor');
   assert.equal(ctx.state('temperature-dhw').state, 47.3);
   assert.equal(ctx.state('dhw-setpoint').state, 50);
   assert.equal(ctx.state('dhw-setpoint-setback').state, 40);
@@ -72,17 +74,30 @@ test('discovery: one device, the values read and published, special values left 
   assert.ok(ctx.hp.reads().every((r) => r.count <= 5));
 });
 
-test('a sensor absent (0x8000) or broken (0x8001) is never published, nor a text as 0', async (t) => {
+test('special values never published: sensors absent, open, short, digital; "no setpoint demand"', async (t) => {
   const clock = testClock({ start: NOW });
   const hp = fakeWeishaupt({ timers: clock.timers });
   hp.set(30002, 0x8000);
-  hp.set(33106, 0x8001);
+  hp.set(33108, 0x10000 - 32767);
+  hp.set(33110, 0x10000 - 32766);
+  hp.set(33111, 0x10000 - 32757);
+  for (const a of [32101, 31101, 31104, 42104]) hp.set(a, 1);
   hp.set(30004, 0);
   const ctx = await setup({ clock, hp });
   t.after(ctx.stop);
-  assert.equal(ctx.state('temperature-air-intake'), undefined);
-  assert.equal(ctx.state('temperature-evaporation'), undefined);
-  assert.equal(ctx.state('warning-code'), undefined, 'an unknown code is not "0"');
+  for (const role of [
+    'temperature-outdoor-2',
+    'temperature-hydraulic-switch',
+    'temperature-buffer',
+    'temperature-total-flow',
+    'temperature-dhw-target',
+    'circuit-1-temperature-room-target',
+    'circuit-1-temperature-flow-target',
+    'dhw-setpoint-setback',
+  ]) {
+    assert.equal(ctx.state(role), undefined, role);
+  }
+  assert.equal(ctx.state('warning-code').text, '0', 'a code is a text');
   for (const s of ctx.gladys.fake.states) {
     assert.ok(!('state' in s && 'text' in s));
   }
@@ -134,23 +149,28 @@ test('a mode: decided on a fresh read, written, confirmed by the read back', asy
   }
 });
 
-test('hot water: bounded by 60 °C and the ceiling, never above 65 °C, whatever the configuration', async (t) => {
+test('hot water: bounded by the ceiling, never above 65 °C, whatever the configuration', async (t) => {
   const ctx = await setup({ config: { ...ALLOW, dhw_max_temperature: 90 } });
   t.after(ctx.stop);
-  for (const value of [60.5, 65, 66, 95, 5, 50.3, '', null, 'abc', '55.0.1']) {
+  for (const value of [65.5, 66, 95, 5, 50.3, '', null, 'abc', '55.0.1']) {
     const ack = await ctx.press('dhw-setpoint', value, 200);
     assert.equal(ack.success, false, `${value} refused`);
   }
   assert.deepEqual(ctx.hp.writes(), []);
-  const ack = await ctx.press('dhw-setpoint', 60);
+  // Above its own maximum (installer setting) the heat pump answers exception 3.
+  ctx.hp.writeExceptions.set(DHW, 3);
+  const refused = await ctx.press('dhw-setpoint', 62);
+  assert.match(String(refused.error), /a refusé la commande/);
+  ctx.hp.writeExceptions.delete(DHW);
+  const ack = await ctx.press('dhw-setpoint', 65);
   assert.equal(ack.success, true, String(ack.error));
-  assert.equal(ctx.hp.temp(DHW), 60);
+  assert.equal(ctx.hp.temp(DHW), 65);
   await ctx.app.configUpdated({ ...ALLOW, dhw_max_temperature: 50 });
   const capped = await ctx.press('dhw-setpoint', 52);
   assert.match(String(capped.error), /plafond/);
   const setback = await ctx.press('dhw-setpoint-setback', 50.5);
   assert.match(String(setback.error), /plafond/);
-  assert.equal(ctx.hp.temp(DHW), 60);
+  assert.equal(ctx.hp.temp(DHW), 65);
   assert.equal(ctx.hp.temp(DHW_SETBACK), 40);
   const slider = ctx.gladys.fake.discoveredDevices
     .at(-1)
@@ -264,9 +284,9 @@ test('a stop goes on a circuit not in the configuration, and while the queue is 
   assert.deepEqual(order.slice(order.indexOf(41303) + 1), [], `nothing after the stop: ${order}`);
 });
 
-test('a stop not confirmed is held: never lifted by the time, sent again slowly', async (t) => {
+test('a stop not confirmed is held, never lifted by the time; three resends at most per click', async (t) => {
   const store = memoryStore();
-  const ctx = await setup({ store });
+  const ctx = await setup({ store, config: ALLOW });
   t.after(ctx.stop);
   ctx.hp.ignoreWrites = true;
   const ack = await ctx.press('system-mode', 'standby');
@@ -275,19 +295,20 @@ test('a stop not confirmed is held: never lifted by the time, sent again slowly'
   assert.equal(store.data.stops.length, 1);
   assert.equal(store.data.stops[0].register, SYSTEM);
   await ctx.advance(4 * MINUTE, 200);
-  const fast = writesTo(ctx.hp, SYSTEM).length;
-  assert.equal(fast, 4, 'the click and three resends');
-  await ctx.advance(30 * MINUTE, 1000);
-  const slow = writesTo(ctx.hp, SYSTEM).length;
-  assert.ok(slow >= fast + 2 && slow <= fast + 3, `${slow} writes: every 10 minutes at most`);
-  assert.equal(store.data.stops.length, 1, 'still held after 34 minutes');
+  assert.equal(writesTo(ctx.hp, SYSTEM).length, 4, 'the click and three resends');
+  await ctx.advance(60 * MINUTE, 1000);
+  assert.equal(writesTo(ctx.hp, SYSTEM).length, 4, 'then held without writing (EEPROM)');
+  assert.equal(store.data.stops.length, 1, 'still held after an hour');
   assert.ok(
-    writesTo(ctx.hp, SYSTEM).every((w) => w.value === STANDBY),
-    'every resend writes the stop, never another mode',
+    ctx.hp.writes().every((w) => w.value === STANDBY),
+    'never another mode',
   );
-  ctx.hp.ignoreWrites = false;
-  await ctx.advance(11 * MINUTE, 1000);
-  assert.equal(ctx.hp.get(SYSTEM), STANDBY);
+  assert.match(String((await ctx.press('dhw-push', '30-min')).error), /pas encore confirmé/);
+  // A new click: three resends again, then shown by the heat pump.
+  await ctx.press('system-mode', 'standby');
+  assert.equal(writesTo(ctx.hp, SYSTEM).length, 5);
+  ctx.hp.set(SYSTEM, STANDBY);
+  await ctx.advance(2 * MINUTE, 500);
   assert.deepEqual(store.data.stops, [], 'lifted once a read shows it');
 });
 
@@ -979,4 +1000,165 @@ test('/data that cannot be saved never blocks a stop', async (t) => {
   const ack = await ctx.press('system-mode', 'standby');
   assert.equal(ack.success, true, String(ack.error));
   assert.equal(ctx.hp.get(SYSTEM), STANDBY);
+});
+
+// --- Review r1 -------------------------------------------------------------------
+
+for (const variant of ['unreachable at the click', 'first write not applied']) {
+  test(`r1-B1 the value of before is read after the click, never the memory (${variant})`, async (t) => {
+    const store = memoryStore();
+    const ctx = await setup({ store, config: { host: HOST, poll_interval: 300 } });
+    t.after(ctx.stop);
+    assert.equal(ctx.state('system-mode').text, 'automatic');
+    // Set at the heat pump after the last read: Gladys still shows "automatic".
+    ctx.hp.set(SYSTEM, 1);
+    await ctx.advance(30 * SECOND, 500);
+    if (variant === 'unreachable at the click') ctx.hp.down = true;
+    else ctx.hp.ignoreWrites = true;
+    const ack = await ctx.press('system-mode', 'standby');
+    assert.equal(ack.success, false);
+    assert.ok(!ctx.app.stopGuards.get(SYSTEM).before.includes('automatic'), 'not from memory');
+    assert.deepEqual(
+      ctx.app.stopGuards.get(SYSTEM).before,
+      variant === 'unreachable at the click' ? [] : ['heating'],
+      'only a value read after the click (the read back)',
+    );
+    ctx.hp.down = false;
+    ctx.hp.ignoreWrites = false;
+    await ctx.advance(90 * SECOND, 200);
+    assert.equal(ctx.hp.get(SYSTEM), STANDBY, 'the stop ends up applied');
+    assert.deepEqual(store.data.stops, []);
+  });
+}
+
+test('r1-I2 a command on its way when a stop is clicked, landing after it, is overwritten', async (t) => {
+  const ctx = await setup({ config: ALLOW });
+  t.after(ctx.stop);
+  ctx.hp.applyClosedWrites = true;
+  // The heating write: its echo is 1.5 s late, it lands 0.8 s after its answer was due.
+  ctx.hp.delayFor = (fc, address, value) => (fc === 6 && value === 1 ? 1500 : 10);
+  ctx.hp.late = (address, value) => (value === 1 ? 800 : 0);
+  const command = ctx.fire('system-mode', 'heating');
+  for (let i = 0; i < 300 && !writesTo(ctx.hp, SYSTEM).length; i += 1) await ctx.advance(10, 10);
+  await ctx.advance(200, 10);
+  const stop = ctx.fire('system-mode', 'standby');
+  await ctx.advance(4 * SECOND, 50);
+  assert.equal((await stop).success, true, String((await stop).error));
+  await command;
+  await ctx.advance(3 * MINUTE, 200);
+  assert.equal(ctx.hp.get(SYSTEM), STANDBY, 'the stop wins over the earlier command');
+  assert.deepEqual(
+    writesTo(ctx.hp, SYSTEM)
+      .map((w) => w.value)
+      .slice(0, 2),
+    [1, STANDBY],
+  );
+});
+
+test('r1-I2 a command write is marked as it leaves, before its answer', async (t) => {
+  const ctx = await setup({ config: ALLOW });
+  t.after(ctx.stop);
+  ctx.hp.delayFor = (fc) => (fc === 6 ? 1500 : 10);
+  const command = ctx.fire('system-mode', 'heating');
+  for (let i = 0; i < 300 && !writesTo(ctx.hp, SYSTEM).length; i += 1) await ctx.advance(10, 10);
+  assert.equal(ctx.app.guards.get('systemMode')?.expected, 'heating', 'marked while on its way');
+  await ctx.advance(5 * SECOND, 50);
+  await command;
+});
+
+test('r1-I2 a command refused by the heat pump does not hold the next stop', async (t) => {
+  const ctx = await setup({ config: ALLOW });
+  t.after(ctx.stop);
+  ctx.hp.writeExceptions.set(SYSTEM, 3);
+  assert.match(String((await ctx.press('system-mode', 'heating')).error), /a refusé/);
+  ctx.hp.writeExceptions.delete(SYSTEM);
+  const ack = await ctx.press('system-mode', 'standby');
+  assert.equal(ack.success, true, String(ack.error));
+  assert.equal(ctx.app.stopGuards.size, 0, 'confirmed and lifted: nothing can land after it');
+});
+
+test('r1-I5 a stop whose connection is dropped is tried again within its 3 s', async (t) => {
+  const ctx = await setup();
+  t.after(ctx.stop);
+  ctx.hp.dropNext = 1;
+  const ack = await ctx.press('system-mode', 'standby', 3500);
+  assert.equal(ack.success, true, String(ack.error));
+  assert.equal(ctx.hp.get(SYSTEM), STANDBY);
+});
+
+test('r1-I5 a mode read back outside its list: the command is not sent', async (t) => {
+  const ctx = await setup({ config: ALLOW });
+  t.after(ctx.stop);
+  ctx.hp.set(SYSTEM, 9);
+  const ack = await ctx.press('system-mode', 'heating');
+  assert.match(String(ack.error), /n’a pas pu être relue/);
+  assert.deepEqual(ctx.hp.writes(), []);
+});
+
+test('r1-I5 a click on the value of before while a stop is held: written, never overwritten by the stop', async (t) => {
+  const ctx = await setup({ config: ALLOW });
+  t.after(ctx.stop);
+  ctx.hp.ignoreWrites = true;
+  await ctx.press('system-mode', 'standby');
+  await ctx.advance(25 * SECOND, 200);
+  ctx.hp.ignoreWrites = false;
+  // "automatic" is what the heat pump still shows and the value of before.
+  const ack = await ctx.press('system-mode', 'automatic');
+  assert.equal(ack.success, true, String(ack.error));
+  const after = writesTo(ctx.hp, SYSTEM).length;
+  assert.equal(writesTo(ctx.hp, SYSTEM).at(-1).value, 0, 'written although already so');
+  await ctx.advance(3 * MINUTE, 200);
+  assert.equal(writesTo(ctx.hp, SYSTEM).length, after, 'the stop is not sent again over it');
+  assert.equal(ctx.hp.get(SYSTEM), 0);
+  assert.equal(ctx.app.stopGuards.size, 0);
+});
+
+test('r1-m2 the hot water push is a timer: 5-240 min read, a push counting down keeps the stop held', async (t) => {
+  const ctx = await setup();
+  t.after(ctx.stop);
+  ctx.hp.set(PUSH, 240);
+  await ctx.advance(61 * SECOND, 500);
+  assert.equal(ctx.state('dhw-push').text, '240-min');
+  ctx.hp.ignoreWrites = true;
+  await ctx.press('dhw-push', 'off');
+  for (let m = 239; m > 235; m -= 1) {
+    ctx.hp.set(PUSH, m);
+    await ctx.advance(30 * SECOND, 200);
+  }
+  assert.equal(ctx.app.stopGuards.size, 1, 'a counting timer is not "changed elsewhere"');
+  assert.ok(writesTo(ctx.hp, PUSH).length >= 2);
+  assert.ok(writesTo(ctx.hp, PUSH).every((w) => w.value === 0));
+  ctx.hp.ignoreWrites = false;
+  await ctx.press('dhw-push', 'off');
+  assert.equal(ctx.hp.get(PUSH), 0);
+});
+
+test('r1-m1 EEPROM: 20 changes of a setting a day, kept in /data across a restart', async (t) => {
+  const clock = testClock({ start: NOW });
+  const times = Array.from({ length: 20 }, (_, i) => NOW - 20 * 60 * MINUTE + i * 30 * MINUTE);
+  const store = memoryStore({
+    lastAttemptAt: NOW - 2 * MINUTE,
+    stops: [],
+    writes: { 42103: times },
+  });
+  const ctx = await setup({ clock, store, config: ALLOW });
+  t.after(ctx.stop);
+  await ctx.advance(61 * SECOND, 500);
+  const ack = await ctx.press('dhw-setpoint', 52);
+  assert.match(String(ack.error), /dernières 24 heures/);
+  assert.equal((await ctx.press('dhw-setpoint', 48)).success, true, 'a lower setpoint goes');
+  assert.equal(store.data.writes[42103].length, 21, 'kept in /data, the lower one counted');
+  assert.equal((await ctx.press('circuit-1-setpoint-normal', 21.5)).success, true);
+  assert.equal(store.data.writes[41106].length, 1);
+});
+
+test('r1-I1 a party/pause register not served never fails the poll', async (t) => {
+  const clock = testClock({ start: NOW });
+  const hp = fakeWeishaupt({ timers: clock.timers });
+  hp.exceptions.set(41104, 2);
+  const ctx = await setup({ clock, hp });
+  t.after(ctx.stop);
+  assert.equal(ctx.gladys.fake.connectionStatus.connected, true);
+  assert.equal(ctx.state('circuit-1-mode').text, 'automatic');
+  assert.equal(ctx.state('circuit-1-party-pause'), undefined);
 });

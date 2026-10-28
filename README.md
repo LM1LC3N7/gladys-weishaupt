@@ -1,11 +1,10 @@
 # gladys-weishaupt
 
 [Gladys Assistant](https://gladysassistant.com) external integration for **Weishaupt heat pumps with a
-built-in Modbus TCP interface** (WBB and other recent models), on the local network (port 502, no
+built-in Modbus TCP interface** (WAB, WBB, WSB, WGB), on the local network (port 502, no
 cloud, no password): temperatures, system and heat pump state, fault, error and warning codes, power
-demand, heating circuits 1 to 5, hot water, second heat generator; mode, setpoint and hot water push
-commands behind an off-by-default option (hot water capped at 60 °C and at the configured ceiling,
-65 °C at most), standby, circuit standby and push off never behind that option. The separate
+demand, heating circuits 1 to 4, hot water, second heat generator; mode, setpoint and hot water push
+commands behind an off-by-default option (hot water capped at the configured ceiling, 65 °C at most), standby, circuit standby and push off never behind that option. The separate
 Weishaupt Modbus module is not supported. **Never tested with a real device. Not affiliated with
 Weishaupt.** Modbus TCP has no authentication: keep the heat pump on a trusted network.
 
@@ -38,7 +37,7 @@ Gladys ⇄ SDK ⇄ src/handlers.js ⇄ src/app.js (WeishauptApp)
 - **Stops** (protective): system standby, circuit standby, push off; never behind the option, the
   bounds, a read or a command; drop every command that arrived before; retried for 3 s; held in
   `/data` with the value of before until a read shows them (never dropped by the time), checked every
-  15 s then every minute, sent again while the value of before shows; lifted by a newer command to
+  15 s then every minute, sent again while the value of before shows (three times per click); lifted by a newer command to
   the same register, by another value read twice in a row, or by a configuration naming another heat
   pump. One lock for the line: a session opens only once the previous one is closed.
 
@@ -51,8 +50,9 @@ npm run lint && npm run format:check
 gi ci          # the whole CI locally (VM tooling)
 ```
 
-Register map: the register list of [weishaupt_modbus](https://github.com/OStrama/weishaupt_modbus)
-1.0.19 (MIT, see `THIRD_PARTY_NOTICES.md`), taken from the datapoint list Weishaupt gave its users.
+Register map: Weishaupt's datapoint list "Modbus TCP (WWP)" 83807301 (1/2025-11, public on
+weishaupt.de), cross-checked with [weishaupt_modbus](https://github.com/OStrama/weishaupt_modbus)
+1.0.19 (MIT, see `THIRD_PARTY_NOTICES.md`).
 
 ## License
 

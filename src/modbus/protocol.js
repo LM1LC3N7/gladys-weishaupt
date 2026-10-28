@@ -72,16 +72,30 @@ export function parseRead(block, pdu) {
   return words;
 }
 
-/** "No sensor" (0x8000) and "sensor broken" (0x8001): never a temperature. */
-export const TEMP_SPECIAL = new Set([0x8000, 0x8001]);
+const signedOf = (word) =>
+  Number.isInteger(word) && word >= 0 && word <= 0xffff
+    ? word >= 0x8000
+      ? word - 0x10000
+      : word
+    : undefined;
 
-/** A temperature register: signed 16 bits in 0.1 °C, special values unknown. */
+/**
+ * "Format Sensor" (Weishaupt): signed 0.1 °C, -50.0 to 500.0 °C; -32768 no
+ * sensor, -32767 open circuit, -32766 short circuit, -32758 / -32757 digital
+ * state off / on: never temperatures (all below -500, so out of the range).
+ */
 export function tempOf(word) {
-  if (!Number.isInteger(word) || word < 0 || word > 0xffff || TEMP_SPECIAL.has(word)) {
-    return undefined;
-  }
-  const signed = word >= 0x8000 ? word - 0x10000 : word;
-  return signed / 10;
+  const signed = signedOf(word);
+  return signed !== undefined && signed >= -500 && signed <= 5000 ? signed / 10 : undefined;
+}
+
+/**
+ * "FormatSollwert" (Weishaupt): 50 to 5000 = 5.0 to 500.0 °C; -32768 and 1
+ * "no setpoint demand" (never 0.1 °C), anything else unknown.
+ */
+export function setpointOf(word) {
+  const signed = signedOf(word);
+  return signed !== undefined && signed >= 50 && signed <= 5000 ? signed / 10 : undefined;
 }
 
 /** A percentage register: 0-100, 0xFFFF (and anything above 100) unknown. */
@@ -92,7 +106,7 @@ export const pctOf = (word) =>
 export const wordOf = (word) =>
   Number.isInteger(word) && word >= 0 && word <= 0xffff ? word : undefined;
 
-const DECODERS = { temp: tempOf, pct: pctOf, word: wordOf };
+const DECODERS = { temp: tempOf, set: setpointOf, pct: pctOf, word: wordOf };
 
 /** The raw values of a block, by key; only those decodable. */
 export function decodeBlock(block, words) {
@@ -113,7 +127,7 @@ export const DHW_REGISTERS = new Set([42103, 42104]);
 /**
  * The write request of one register (function 6): a temperature in °C
  * (written in 0.1 °C, signed) or a state. The hot water setpoints are checked
- * here once more: never above BOUNDS.dhw.max nor DHW_CAP.max (65 °C),
+ * here once more: never above DHW_CAP.max (65 °C),
  * whatever the caller asked.
  */
 export function writeRequest(address, type, value) {
@@ -121,10 +135,10 @@ export function writeRequest(address, type, value) {
     throw new RangeError('Only holding registers 4xxxx are written');
   }
   let word;
-  if (type === 'temp') {
+  if (type === 'temp' || type === 'set') {
     if (!Number.isFinite(value)) throw new RangeError('A temperature is a finite number');
     if (DHW_REGISTERS.has(address)) {
-      if (value > DHW_CAP.max || value > BOUNDS.dhw.max || value < BOUNDS.dhw.min) {
+      if (value > DHW_CAP.max || value < BOUNDS.dhw.min) {
         throw new RangeError('Hot water setpoint out of bounds');
       }
     }

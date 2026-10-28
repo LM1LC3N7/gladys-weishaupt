@@ -22,9 +22,9 @@ test('addresses: IPv4 or host name, optional port; never broadcast, multicast no
   }
 });
 
-test('circuits: numbers 1 to 5 only, nothing guessed', () => {
+test('circuits: numbers 1 to 4 only (Weishaupt list), nothing guessed', () => {
   assert.deepEqual(parseCircuits('1, 2 ;3'), { circuits: ['1', '2', '3'], invalid: false });
-  assert.deepEqual(parseCircuits('1, 6, A'), { circuits: ['1'], invalid: true });
+  assert.deepEqual(parseCircuits('1, 5, A'), { circuits: ['1'], invalid: true });
   assert.deepEqual(parseCircuits('3 1'), { circuits: ['1', '3'], invalid: false });
   assert.deepEqual(parseCircuits(''), { circuits: [], invalid: false });
   assert.deepEqual(parseCircuits(42), { circuits: [], invalid: false });
@@ -75,9 +75,9 @@ test('/data: repaired and bounded; a stop is never dropped for its age; a click 
           host: '192.168.1.60',
           port: 502,
           unitId: 1,
-          register: 41503,
+          register: 41403,
           since: now,
-          before: ['60-min'],
+          before: ['running'],
         },
         {
           host: '192.168.1.60',
@@ -85,17 +85,30 @@ test('/data: repaired and bounded; a stop is never dropped for its age; a click 
           unitId: 1,
           register: 42102,
           since: now,
-          before: ['60-min'],
+          before: ['running', '60-min'],
+        },
+        {
+          host: '192.168.1.60',
+          port: 502,
+          unitId: 1,
+          register: 41503,
+          since: now,
         },
       ],
       target: { host: '192.168.1.60', port: 502, unitId: 1 },
+      writes: {
+        42103: [now - 1000, now - 2 * 86_400_000, now + 1e9, 'x'],
+        30001: [now],
+        abc: [now],
+      },
     },
     now,
   );
+  assert.deepEqual(m.writes, { 42103: [now - 1000] }, 'last 24 h, holding registers only');
   assert.equal(m.lastAttemptAt, now);
   assert.deepEqual(
     m.stops.map((s) => s.register),
-    [40001, 41503, 42102],
+    [40001, 41403, 42102],
     'known stop registers, clean hosts, not in the future, whatever their age',
   );
   assert.equal(m.stops[0].since, now - 30 * 86_400_000);
@@ -107,13 +120,14 @@ test('/data: repaired and bounded; a stop is never dropped for its age; a click 
     ['automatic', 'heating'],
     'keys of the register, two at most',
   );
-  assert.deepEqual(m.stops[1].before, [], 'a push value is not a circuit mode');
-  assert.deepEqual(m.stops[2].before, ['60-min']);
+  assert.deepEqual(m.stops[1].before, [], 'a push value is not a circuit mode; no circuit 5');
+  assert.deepEqual(m.stops[2].before, ['running']);
   assert.equal(m.stops[1].sentAt, null);
   assert.deepEqual(m.target, { host: '192.168.1.60', port: 502, unitId: 1 });
   assert.deepEqual(normalizeMemory('garbage', now), {
     target: null,
     lastAttemptAt: null,
     stops: [],
+    writes: {},
   });
 });

@@ -2,32 +2,35 @@
 // A fake Weishaupt heat pump behind the injected `connect` (no network), on
 // the timers of the test clock: Modbus TCP framing (MBAP), function 4 reads
 // of the input registers (3xxxx), function 3 reads of the holding registers
-// (4xxxx) and function 6 writes, answers after a delay. Like the register
-// list of weishaupt_modbus, a read must cover documented addresses of its
-// table only (else exception 2); a write must hit a writable holding
-// register. It counts the connections open at once (the integration must
+// (4xxxx) and function 6 writes, answers after a delay. Like Weishaupt's
+// datapoint list (83807301), a read must cover five listed registers at most,
+// contiguous, of its table only (else exception 2); a write must hit a
+// writable holding register. It counts the connections open at once (the integration must
 // never open a second one). Values made up, never from a real heat pump.
 // -----------------------------------------------------------------------------
 
 import { EventEmitter } from 'node:events';
-import { BLOCKS, CIRCUITS, CIRCUIT_BLOCKS, CIRCUIT_STEP } from '../../src/constants.js';
+import { CIRCUITS, CIRCUIT_STEP } from '../../src/constants.js';
 
 export const HOST = '192.168.1.60';
 export const NOW = Date.UTC(2026, 9, 28, 10, 0, 0);
 
 const offset = (c) => (Number(c) - 1) * CIRCUIT_STEP;
 
-/** Every documented address (the blocks, and a few documented ones never read). */
+/**
+ * Every listed address: Weishaupt's list 83807301 (1/2025-11), plus 41x04
+ * (party/pause, in weishaupt_modbus only: an optional block).
+ */
 export const DOCUMENTED = new Set([
-  ...BLOCKS.flatMap((b) => b.points.map(([a]) => a)),
-  ...CIRCUITS.flatMap((c) => CIRCUIT_BLOCKS.flatMap((b) => b.points.map(([a]) => a + offset(c)))),
-  40002,
-  42105,
-  33109,
-  33110,
-  33111,
-  34106,
-  34107,
+  ...[30001, 30002, 30003, 30004, 30005, 30006, 40001, 40002],
+  ...[32101, 32102, 42102, 42103, 42104],
+  ...[33101, 33102, 33103, 33104, 33105, 33108, 33109, 33110, 33111],
+  ...[34101, 34102, 34104, 34105, 34106, 34107],
+  ...CIRCUITS.flatMap((c) =>
+    [31101, 31102, 31103, 31104, 31105, 41103, 41104, 41105, 41106, 41107, 41110, 41111, 41112].map(
+      (a) => a + offset(c),
+    ),
+  ),
 ]);
 const WRITABLE = new Set([
   40001,
@@ -59,22 +62,17 @@ export function defaultValues() {
     33103: 42,
     33104: t(35.2),
     33105: t(30.1),
-    33106: t(-2.5),
-    33107: t(3.2),
     33108: t(34.9),
     33109: 0x8000,
-    33110: 0x8000,
+    33110: t(-2.5),
     33111: t(35.1),
     32101: t(48),
     32102: t(47.3),
-    42101: 1,
     42102: 0,
     42103: t(50),
     42104: t(40),
-    42105: t(5),
     34101: 0,
     34102: 12,
-    34103: 3,
     34104: 0,
     34105: 0,
     34106: 2,
@@ -84,18 +82,19 @@ export function defaultValues() {
     const o = offset(c);
     const on = c === '1';
     Object.assign(v, {
-      [31101 + o]: on ? t(21) : 0x8000,
+      [31101 + o]: on ? t(21) : 1,
       [31102 + o]: on ? t(20.6) : 0x8000,
       [31103 + o]: on ? 48 : 0xffff,
       [31104 + o]: on ? t(34) : 0x8000,
       [31105 + o]: on ? t(33.5) : 0x8000,
-      [41101 + o]: on ? 2 : 0,
-      [41102 + o]: 1,
       [41103 + o]: 0,
       [41104 + o]: 25,
       [41105 + o]: t(22),
       [41106 + o]: t(21),
       [41107 + o]: t(18),
+      [41110 + o]: t(30),
+      [41111 + o]: t(25),
+      [41112 + o]: t(18),
     });
   }
   return v;
@@ -157,12 +156,19 @@ export function fakeWeishaupt({ timers, values = defaultValues(), unitId = 1 } =
     /** Addresses (start of a request) that never answer, or answer an exception. */
     silent: new Set(),
     exceptions: new Map(),
+    /** Exceptions answered to writes only, by address. */
+    writeExceptions: new Map(),
     /** Writes acknowledged but not applied, or applied after `applyDelay` ms. */
     ignoreWrites: false,
     applyDelay: 0,
     /** Writes applied even when their connection closed before the answer. */
     applyClosedWrites: false,
     badEcho: false,
+    /** Per request: the delay of its answer (ms), the extra delay before a write lands. */
+    delayFor: undefined,
+    late: undefined,
+    /** The next requests drop the connection instead of answering. */
+    dropNext: 0,
     ends: 0,
     closeDelay: 0,
     clientDestroys: 0,
@@ -191,7 +197,7 @@ export function fakeWeishaupt({ timers, values = defaultValues(), unitId = 1 } =
       for (let a = address; a < address + count; a += 1) {
         if (!DOCUMENTED.has(a) || a < table[0] || a > table[1]) return false;
       }
-      return count >= 1;
+      return count >= 1 && count <= 5;
     },
     handle(socket, frame) {
       const tid = frame.readUInt16BE(0);
@@ -202,49 +208,64 @@ export function fakeWeishaupt({ timers, values = defaultValues(), unitId = 1 } =
       const second = pdu.readUInt16BE(3);
       hp.log.push(fc === 6 ? { fc, address, value: second } : { fc, address, count: second });
       if (hp.silent.has(address)) return;
-      timers.setTimeout(() => {
-        if (socket.destroyed) {
-          if (fc === 6 && hp.applyClosedWrites && !hp.ignoreWrites) hp.set(address, second);
-          return;
-        }
-        let answer;
-        const exception = hp.exceptions.get(address);
-        if (exception) {
-          answer = Buffer.from([fc | 0x80, exception]);
-        } else if (fc === 3 || fc === 4) {
-          if (!hp.documented(fc, address, second)) {
-            answer = Buffer.from([fc | 0x80, 2]);
-          } else {
-            answer = Buffer.alloc(2 + second * 2);
-            answer[0] = fc;
-            answer[1] = second * 2;
-            for (let i = 0; i < second; i += 1) {
-              answer.writeUInt16BE(map.get(address + i) ?? 0, 2 + i * 2);
-            }
+      if (hp.dropNext > 0) {
+        hp.dropNext -= 1;
+        socket.ending = true;
+        socket.destroy();
+        return;
+      }
+      const land = (a, v) => {
+        const extra = hp.late?.(a, v) ?? 0;
+        if (extra > 0) timers.setTimeout(() => hp.set(a, v), extra);
+        else hp.set(a, v);
+      };
+      timers.setTimeout(
+        () => {
+          if (socket.destroyed) {
+            if (fc === 6 && hp.applyClosedWrites && !hp.ignoreWrites) land(address, second);
+            return;
           }
-        } else if (fc === 6) {
-          if (!WRITABLE.has(address)) {
-            answer = Buffer.from([fc | 0x80, 2]);
-          } else {
-            if (!hp.ignoreWrites) {
-              if (hp.applyDelay > 0)
-                timers.setTimeout(() => hp.set(address, second), hp.applyDelay);
-              else hp.set(address, second);
+          let answer;
+          const exception =
+            hp.exceptions.get(address) ?? (fc === 6 ? hp.writeExceptions.get(address) : undefined);
+          if (exception) {
+            answer = Buffer.from([fc | 0x80, exception]);
+          } else if (fc === 3 || fc === 4) {
+            if (!hp.documented(fc, address, second)) {
+              answer = Buffer.from([fc | 0x80, 2]);
+            } else {
+              answer = Buffer.alloc(2 + second * 2);
+              answer[0] = fc;
+              answer[1] = second * 2;
+              for (let i = 0; i < second; i += 1) {
+                answer.writeUInt16BE(map.get(address + i) ?? 0, 2 + i * 2);
+              }
             }
-            answer = Buffer.from(pdu.subarray(0, 5));
-            if (hp.badEcho) answer[4] ^= 1;
+          } else if (fc === 6) {
+            if (!WRITABLE.has(address)) {
+              answer = Buffer.from([fc | 0x80, 2]);
+            } else {
+              if (!hp.ignoreWrites) {
+                if (hp.applyDelay > 0)
+                  timers.setTimeout(() => land(address, second), hp.applyDelay);
+                else land(address, second);
+              }
+              answer = Buffer.from(pdu.subarray(0, 5));
+              if (hp.badEcho) answer[4] ^= 1;
+            }
+          } else {
+            answer = Buffer.from([fc | 0x80, 1]);
           }
-        } else {
-          answer = Buffer.from([fc | 0x80, 1]);
-        }
-        const out = Buffer.alloc(7 + answer.length);
-        out.writeUInt16BE(hp.wrongTransaction ? (tid + 1) & 0xffff : tid, 0);
-        out.writeUInt16BE(0, 2);
-        out.writeUInt16BE(answer.length + 1, 4);
-        out[6] = hp.wrongUnit ? (uid + 1) & 0xff : uid;
-        answer.copy(out, 7);
-        socket.emit('data', out);
-      }, hp.delay);
+          const out = Buffer.alloc(7 + answer.length);
+          out.writeUInt16BE(hp.wrongTransaction ? (tid + 1) & 0xffff : tid, 0);
+          out.writeUInt16BE(0, 2);
+          out.writeUInt16BE(answer.length + 1, 4);
+          out[6] = hp.wrongUnit ? (uid + 1) & 0xff : uid;
+          answer.copy(out, 7);
+          socket.emit('data', out);
+        },
+        hp.delayFor?.(fc, address, second) ?? hp.delay,
+      );
     },
     connect() {
       const socket = new FakeSocket(hp);

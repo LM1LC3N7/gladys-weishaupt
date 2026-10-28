@@ -21,8 +21,9 @@ import {
   CIRCUITS,
   CIRCUIT_MODES,
   CIRCUIT_STEP,
-  DHW_PUSH,
   SYSTEM_MODES,
+  DAY,
+  LIMITS,
   TIMINGS,
   UNIT_ID,
 } from './constants.js';
@@ -97,7 +98,7 @@ const intIn = (value, min, max) =>
 /** The registers a stop may write, with the keys of the values they may hold. */
 const STOP_REGISTERS = new Map([
   [40001, Object.values(SYSTEM_MODES)],
-  [42102, Object.values(DHW_PUSH)],
+  [42102, ['off', 'running']],
   ...CIRCUITS.map((c) => [41103 + (Number(c) - 1) * CIRCUIT_STEP, Object.values(CIRCUIT_MODES)]),
 ]);
 
@@ -155,10 +156,24 @@ export function normalizeMemory(raw, now) {
   const host = shortText(target.host, 253);
   const port = intIn(target.port, 1, 65535);
   const unitId = intIn(target.unitId, UNIT_ID.min, UNIT_ID.max);
+  // The command writes of the last 24 h (EEPROM budget), per holding register.
+  const writes = {};
+  const rawWrites = data.writes && typeof data.writes === 'object' ? data.writes : {};
+  for (const [key, list] of Object.entries(rawWrites).slice(0, 64)) {
+    const register = Number(key);
+    if (!Number.isInteger(register) || register < 40001 || register > 49999) continue;
+    if (!Array.isArray(list)) continue;
+    const times = list
+      .filter((t) => Number.isFinite(t) && t > now - DAY && t <= now + 1000)
+      .map((t) => Math.min(t, now))
+      .slice(-LIMITS.eepromWritesPerDay);
+    if (times.length > 0) writes[register] = times;
+  }
   return {
     /** The heat pump of the last read: where a stop goes while the configuration is not read. */
     target: host && /^[a-z0-9.-]+$/.test(host) && port && unitId ? { host, port, unitId } : null,
     lastAttemptAt: Number.isFinite(data.lastAttemptAt) ? Math.min(data.lastAttemptAt, now) : null,
     stops,
+    writes,
   };
 }

@@ -1,33 +1,37 @@
 // -----------------------------------------------------------------------------
 // Weishaupt constants: the Modbus TCP map of the heat pumps with a built-in
-// Modbus TCP interface (WBB, WWP LS, WAB/WSB… with a recent controller),
-// manifest keys, feature roles, limits and timings.
+// Modbus TCP interface (WAB, WBB, WSB, WGB), manifest keys, feature roles,
+// limits and timings.
 //
 // The heat pump answers Modbus TCP on port 502, unit id 1, without
-// authentication, once "Modbus TCP" is on (User > Settings > Modbus TCP,
-// "Parameter: On", with the network and netmask allowed to connect). The
-// separate Weishaupt Modbus module is another product, not covered.
+// authentication, once "Modbus TCP" is on (Settings > Modbus TCP, "Access:
+// On", with the network and netmask allowed to connect). The separate
+// Weishaupt Modbus module is another product, not covered.
 //
-// The registers are those of the datapoint list Weishaupt gave to users of
-// weishaupt_modbus (MIT, OStrama; register list kept in its hpconst.py, the
-// shared copy of Weishaupt's sheet is no longer public): only the addresses
-// it documents, with its formats, are used. The address of the list is sent
-// as is in the PDU (30001 -> 0x7531), as weishaupt_modbus and the field YAML
-// configurations do. Only these requests are ever sent:
+// The registers are those of Weishaupt's own datapoint list "Datenpunktliste
+// Modbus TCP (WWP)" 83807301 (1/2025-11, public on weishaupt.de), cross-
+// checked with weishaupt_modbus 1.0.19 (MIT, OStrama). Every register read in
+// a core block is in Weishaupt's list; the party/pause of a circuit (41x04),
+// only in weishaupt_modbus, is read alone in an optional block. The address of
+// the list is sent as is in the PDU (30001 -> 0x7531), as weishaupt_modbus and
+// the field configurations do (the list warns some software shifts it by one).
+// Only these requests are ever sent:
 //   - read input registers (function 4) of the 3xxxx blocks below and read
 //     holding registers (function 3) of the 4xxxx blocks below, each block a
-//     run of documented addresses (5 registers at most, as weishaupt_modbus
-//     groups them), never across a hole;
+//     run of contiguous listed registers, five at most (Weishaupt: "maximal
+//     5 Datenpunkte am Stück, fortlaufend belegt");
 //   - write single register (function 6) at 40001 (system mode), 42102 (hot
 //     water push), 42103-42104 (hot water setpoints), 41x03 (mode of heating
 //     circuit x) and 41x05-41x07 (room setpoints of heating circuit x).
-// The settings are kept by the controller in EEPROM (weishaupt_modbus never
-// writes a value already set "to spare the EEPROM"): the writes are counted
-// (LIMITS.eepromWritesPerHour).
+// Weishaupt: every setting is kept in EEPROM, 100,000 writes in the life of
+// the heat pump, write as little as possible: the writes are counted per hour
+// and per day (LIMITS), the stops are sent again three times at most.
 //
-// Formats (weishaupt_modbus): temperatures signed 16 bits in 0.1 °C, 0x8000
-// "no sensor", 0x8001 "sensor broken" (both unknown here); percentages 0-100,
-// 0xFFFF unknown; states and codes as listed.
+// Formats (Weishaupt): "Format Sensor" signed 0.1 °C, -500..5000, with
+// -32768 no sensor, -32767 open, -32766 short, -32758/-32757 digital state
+// (never temperatures); "FormatSollwert" 50..5000 (5.0-500.0 °C), with
+// -32768 and 1 "no setpoint demand"; humidity 0-100, 65535 none; error codes
+// 65535 none; states and modes as listed.
 // -----------------------------------------------------------------------------
 
 export const DEFAULT_PORT = 502;
@@ -43,8 +47,8 @@ export const FC = {
 export const MBAP_SIZE = 7;
 export const MAX_FRAME = 260;
 
-/** Heating circuits 1 to 5 (Weishaupt "Heizkreis 1" ... "5"): 100 registers apart. */
-export const CIRCUITS = ['1', '2', '3', '4', '5'];
+/** Heating circuits 1 to 4 (Weishaupt "Heizkreis 1" ... "4"): 100 registers apart. */
+export const CIRCUITS = ['1', '2', '3', '4'];
 export const CIRCUIT_STEP = 100;
 
 /**
@@ -63,7 +67,7 @@ export const BLOCKS = [
     core: true,
     points: [
       [30001, 'temp', 'outdoor'],
-      [30002, 'temp', 'airIntake'],
+      [30002, 'temp', 'outdoor2'],
       [30003, 'word', 'error'],
       [30004, 'word', 'warning'],
       [30005, 'word', 'faultFree'],
@@ -87,9 +91,10 @@ export const BLOCKS = [
     key: 'heat-pump-2',
     fc: FC.READ_INPUT,
     points: [
-      [33106, 'temp', 'evaporation'],
-      [33107, 'temp', 'suctionGas'],
       [33108, 'temp', 'hydraulicSwitch'],
+      [33109, 'temp', 'regenerative'],
+      [33110, 'temp', 'buffer'],
+      [33111, 'temp', 'totalFlow'],
     ],
   },
   {
@@ -97,19 +102,18 @@ export const BLOCKS = [
     fc: FC.READ_INPUT,
     core: true,
     points: [
-      [32101, 'temp', 'dhwTarget'],
+      [32101, 'set', 'dhwTarget'],
       [32102, 'temp', 'dhw'],
     ],
   },
+  { key: 'dhw-push', fc: FC.READ_HOLDING, core: true, points: [[42102, 'word', 'dhwPush']] },
   {
-    key: 'dhw-settings',
+    key: 'dhw-setpoints',
     fc: FC.READ_HOLDING,
     core: true,
     points: [
-      [42101, 'word', 'dhwConfig'],
-      [42102, 'word', 'dhwPush'],
-      [42103, 'temp', 'dhwNormal'],
-      [42104, 'temp', 'dhwSetback'],
+      [42103, 'set', 'dhwNormal'],
+      [42104, 'set', 'dhwSetback'],
     ],
   },
   {
@@ -117,8 +121,13 @@ export const BLOCKS = [
     fc: FC.READ_INPUT,
     points: [
       [34101, 'word', 'secondGenerator'],
-      [34102, 'word', 'e1Cycles'],
-      [34103, 'word', 'e1Hours'],
+      [34102, 'word', 'secondGeneratorHours'],
+    ],
+  },
+  {
+    key: 'electric-heaters',
+    fc: FC.READ_INPUT,
+    points: [
       [34104, 'word', 'e1'],
       [34105, 'word', 'e2'],
     ],
@@ -127,39 +136,31 @@ export const BLOCKS = [
 
 /**
  * The blocks of heating circuit 1, keyed `circuit.<n>.<key>`: circuit n adds
- * (n - 1) * 100 to every address (weishaupt_modbus builds circuits 2-5 so).
+ * (n - 1) * 100 to every address (Weishaupt's list).
  */
 export const CIRCUIT_BLOCKS = [
   {
     key: 'values',
     fc: FC.READ_INPUT,
     points: [
-      [31101, 'temp', 'roomTarget'],
+      [31101, 'set', 'roomTarget'],
       [31102, 'temp', 'room'],
       [31103, 'pct', 'humidity'],
-      [31104, 'temp', 'flowTarget'],
+      [31104, 'set', 'flowTarget'],
       [31105, 'temp', 'flow'],
     ],
   },
-  {
-    key: 'settings',
-    fc: FC.READ_HOLDING,
-    core: true,
-    points: [
-      [41101, 'word', 'config'],
-      [41102, 'word', 'demand'],
-      [41103, 'word', 'mode'],
-      [41104, 'word', 'partyPause'],
-      [41105, 'temp', 'comfort'],
-    ],
-  },
+  { key: 'mode', fc: FC.READ_HOLDING, core: true, points: [[41103, 'word', 'mode']] },
+  // Only in weishaupt_modbus, not in Weishaupt's list: optional, read alone.
+  { key: 'party-pause', fc: FC.READ_HOLDING, points: [[41104, 'word', 'partyPause']] },
   {
     key: 'setpoints',
     fc: FC.READ_HOLDING,
     core: true,
     points: [
-      [41106, 'temp', 'normal'],
-      [41107, 'temp', 'setback'],
+      [41105, 'set', 'comfort'],
+      [41106, 'set', 'normal'],
+      [41107, 'set', 'setback'],
     ],
   },
 ];
@@ -184,13 +185,14 @@ export const CIRCUIT_MODES = {
 };
 
 /**
- * Register 42102, the hot water push ("Warmwasser Push"): 0 off, else a
- * duration of 5 to 235 minutes by 5.
+ * Register 42102, the hot water push ("Warmwasser Push", a timer): 0 off,
+ * else 5 to 240 minutes (any minute is read; the choices offered go by 5).
  */
 export const DHW_PUSH = Object.fromEntries([
   [0, 'off'],
-  ...Array.from({ length: 47 }, (_, i) => [(i + 1) * 5, `${(i + 1) * 5}-min`]),
+  ...Array.from({ length: 48 }, (_, i) => [(i + 1) * 5, `${(i + 1) * 5}-min`]),
 ]);
+export const DHW_PUSH_MAX = 240;
 
 /** Registers 30006 and 33101, what the system and the heat pump do ("Betriebsanzeige"). */
 export const OPERATING = {
@@ -229,10 +231,14 @@ export const OPERATING = {
   32: 'locked-winter',
   33: 'operating-limit',
   34: 'circuit-locked',
-  35: 'setback',
-  36: 'flow-regenerative',
-  37: 'heating-sg-ready',
-  39: 'hot-water-sg-ready',
+  35: 'ready',
+  36: 'regenerative',
+  37: 'sg-ready-3-heating',
+  38: 'sg-ready-3-cooling',
+  39: 'sg-ready-3-hot-water',
+  40: 'sg-ready-4-heating',
+  41: 'sg-ready-4-cooling',
+  42: 'sg-ready-4-hot-water',
   43: 'oil-return',
 };
 
@@ -259,12 +265,13 @@ export const FEATURES = {
   WARNING_CODE: 'warning-code',
   POWER_DEMAND: 'power-demand',
   TEMP_OUTDOOR: 'temperature-outdoor',
-  TEMP_AIR_INTAKE: 'temperature-air-intake',
+  TEMP_OUTDOOR_2: 'temperature-outdoor-2',
   TEMP_FLOW: 'temperature-flow',
   TEMP_RETURN: 'temperature-return',
-  TEMP_EVAPORATION: 'temperature-evaporation',
-  TEMP_SUCTION_GAS: 'temperature-suction-gas',
   TEMP_HYDRAULIC_SWITCH: 'temperature-hydraulic-switch',
+  TEMP_REGENERATIVE: 'temperature-regenerative',
+  TEMP_BUFFER: 'temperature-buffer',
+  TEMP_TOTAL_FLOW: 'temperature-total-flow',
   TEMP_DHW: 'temperature-dhw',
   TEMP_DHW_TARGET: 'temperature-dhw-target',
   DHW_SETPOINT: 'dhw-setpoint',
@@ -292,14 +299,16 @@ export const CIRCUIT_FEATURES = {
 export const circuitRole = (circuit, suffix) => `circuit-${circuit}-${suffix}`;
 
 /**
- * The bounds of the values written, from weishaupt_modbus (min, max, step),
- * never wider: hot water 5.5-60 °C by 0.5 (and never above the ceiling of the
- * configuration, 65 °C at most: DHW_CAP), room 16-28 °C by 0.5. The order the
- * controller keeps (comfort >= normal >= setback; hot water normal >= setback)
- * is checked on the values read just before the write.
+ * The bounds of the values written, never wider than weishaupt_modbus (room
+ * 16-28 °C by 0.5) and the rule of the lot: hot water 5.5 °C up to the ceiling
+ * of the configuration, 65 °C at most (DHW_CAP); the heat pump refuses more
+ * than its own hot water maximum (installer setting, 60 °C from the factory,
+ * WBB manual 83315301 § 6.7.4.5). The order the controller keeps (comfort >=
+ * normal >= setback; hot water normal >= setback) is checked on the values
+ * read just before the write.
  */
 export const BOUNDS = {
-  dhw: { min: 5.5, max: 60, step: 0.5 },
+  dhw: { min: 5.5, max: 65, step: 0.5 },
   room: { min: 16, max: 28, step: 0.5 },
 };
 
@@ -327,6 +336,8 @@ export const LIMITS = {
    * setpoint, per register and rolling hour: refused beyond.
    */
   eepromWritesPerHour: 6,
+  /** And per 24 h (kept in /data): 20 a day are 7,300 a year for 100,000 in a life. */
+  eepromWritesPerDay: 20,
   /** Plausible ranges: a value outside is not a measure. */
   temperature: [-50, 120],
 };
@@ -334,6 +345,7 @@ export const LIMITS = {
 export const SECOND = 1_000;
 export const MINUTE = 60 * SECOND;
 export const HOUR = 60 * MINUTE;
+export const DAY = 24 * HOUR;
 
 export const TIMINGS = {
   /** Opening the TCP connection of a poll. */
@@ -381,14 +393,13 @@ export const TIMINGS = {
    * A stop not confirmed is held (in /data) until a read shows it, a newer
    * command to its register leaves, or another value is read twice in a row:
    * never lifted by the time. Checked every 15 s for 3 minutes, then every
-   * minute; sent again while the value of before shows: three times in the
-   * first 3 minutes, then once every 10 minutes at most (EEPROM).
+   * minute (reads only); sent again while the value of before shows, three
+   * times at most per click (EEPROM), then held without writing.
    */
   stopFastChecks: 3 * MINUTE,
   stopRetry: 15 * SECOND,
   stopSlowRetry: MINUTE,
   stopReasserts: 3,
-  stopSlowResend: 10 * MINUTE,
   /** Another value read this many times in a row lifts a stop (changed at the heat pump). */
   stopOtherReads: 2,
   /** A check that gave its turn up to a click or a command is tried again this soon. */

@@ -3,8 +3,9 @@
 // values that are not measures, the texts of the states and modes.
 //
 // Special values (never published as measures):
-//   - temperatures 0x8000 "no sensor" and 0x8001 "sensor broken" (protocol.js
-//     already drops them: weishaupt_modbus shows the second as -99.9 °C);
+//   - sensors: no sensor, open, short, digital state (protocol.js drops them;
+//     weishaupt_modbus shows an open sensor as -99.9 °C);
+//   - setpoints: -32768 and 1 "no setpoint demand" (never 0.1 °C);
 //   - percentages 0xFFFF;
 //   - a state or a mode outside its list: unknown, never a number;
 //   - error and warning 0xFFFF: "none" (a text, never 0).
@@ -14,7 +15,7 @@
 import {
   CIRCUITS,
   CIRCUIT_MODES,
-  DHW_PUSH,
+  DHW_PUSH_MAX,
   LIMITS,
   NO_ERROR,
   OPERATING,
@@ -26,12 +27,13 @@ const within = (value, [min, max]) =>
 
 const TEMPERATURES = [
   'outdoor',
-  'airIntake',
+  'outdoor2',
   'flow',
   'return',
-  'evaporation',
-  'suctionGas',
   'hydraulicSwitch',
+  'regenerative',
+  'buffer',
+  'totalFlow',
   'dhw',
   'dhwTarget',
 ];
@@ -49,10 +51,18 @@ const faultOf = (faultFree) => (faultFree === 1 ? 0 : faultFree === 0 ? 1 : unde
 
 const flag = (value) => (value === 0 || value === 1 ? value : undefined);
 
-/** Error and warning codes: "none", or the code as a text ("13"). */
+/** Register 42102, the hot water push timer: "off", or "<minutes>-min" (5 to 240). */
+export function dhwPushOf(value) {
+  if (value === 0) return 'off';
+  return Number.isInteger(value) && value >= 5 && value <= DHW_PUSH_MAX
+    ? `${value}-min`
+    : undefined;
+}
+
+/** Error and warning codes: "none" (65535), or the code as a text ("13"). */
 export function codeOf(value) {
   if (value === NO_ERROR) return 'none';
-  return Number.isInteger(value) && value >= 1 && value <= 999 ? String(value) : undefined;
+  return Number.isInteger(value) && value >= 0 && value <= 0xfffe ? String(value) : undefined;
 }
 
 /**
@@ -78,11 +88,13 @@ export function interpret(raw) {
   put('systemMode', lookup(SYSTEM_MODES, raw.systemMode));
   put('operatingState', lookup(OPERATING, raw.display));
   put('heatPumpState', lookup(OPERATING, raw.operation));
-  put('fault', faultOf(raw.faultFree));
+  // 33102 "Störmeldung" (Weishaupt: 0 fault, 1 no fault). 30005 is read
+  // but not published: the list gives it the format of an error code.
+  put('fault', faultOf(raw.hpFaultFree));
   put('errorCode', codeOf(raw.error));
   put('warningCode', codeOf(raw.warning));
   put('powerDemand', raw.powerDemand);
-  put('dhwPush', lookup(DHW_PUSH, raw.dhwPush));
+  put('dhwPush', dhwPushOf(raw.dhwPush));
   put('dhwNormal', setpoint(raw.dhwNormal, [0, 90]));
   put('dhwSetback', setpoint(raw.dhwSetback, [0, 90]));
   put('secondGenerator', flag(raw.secondGenerator));

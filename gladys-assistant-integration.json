@@ -21,8 +21,8 @@
         "fr": "Votre pompe à chaleur Weishaupt"
       },
       "description": {
-        "en": "Shows your Weishaupt heat pump with built-in Modbus TCP (WBB and other recent models) in Gladys over your local network (port 502), without any cloud: temperatures, states, fault and codes, heating circuits 1 to 5, hot water, second heat generator. On the heat pump, set User > Settings > Modbus TCP to \"On\" with Gladys in the allowed network, enter its IP address here, save, then add it from the Discovery tab. The separate Weishaupt Modbus module is not supported. Modes, setpoints and the hot water push change only if you allow the commands below; hot water never above 60 °C nor the ceiling below (65 °C at most). Standby, circuit standby and push off never depend on that option (see the guide for when they can fail). Modbus TCP has no password: keep the heat pump on a trusted network. Never tested with a real device. Not affiliated with Weishaupt.",
-        "fr": "Affiche votre pompe à chaleur Weishaupt à Modbus TCP intégré (WBB et autres modèles récents) dans Gladys sur votre réseau local (port 502), sans cloud : températures, états, défaut et codes, circuits 1 à 5, eau chaude, second générateur. Sur la pompe, réglez Utilisateur > Réglages > Modbus TCP sur « Marche » avec Gladys dans le réseau autorisé, saisissez ici son adresse IP, enregistrez, puis ajoutez-la depuis l’onglet Découverte. Le module Modbus séparé de Weishaupt n’est pas pris en charge. Modes, consignes et charge forcée ne changent que si vous autorisez les commandes ci-dessous ; eau chaude jamais au-dessus de 60 °C ni du plafond ci-dessous (65 °C au plus). La veille, celle d’un circuit et l’arrêt de la charge forcée ne dépendent jamais de cette option (voir le guide pour les cas d’échec). Le Modbus TCP n’a pas de mot de passe : gardez la pompe sur un réseau de confiance. Jamais testé avec un vrai appareil. Sans lien avec Weishaupt."
+        "en": "Shows your Weishaupt heat pump with built-in Modbus TCP (WAB, WBB, WSB, WGB) in Gladys over your local network (port 502), without any cloud: temperatures, states, fault and codes, heating circuits 1 to 4, hot water, second heat generator. On the heat pump, set User > Settings > Modbus TCP to \"On\" with Gladys in the allowed network, enter its IP address here, save, then add it from the Discovery tab. The separate Weishaupt Modbus module is not supported. Modes, setpoints and the hot water push change only if you allow the commands below; hot water never above the ceiling below (65 °C at most). Standby, circuit standby and push off never depend on that option (see the guide for when they can fail). Modbus TCP has no password: keep the heat pump on a trusted network. Never tested with a real device. Not affiliated with Weishaupt.",
+        "fr": "Affiche votre pompe à chaleur Weishaupt à Modbus TCP intégré (WAB, WBB, WSB, WGB) dans Gladys sur votre réseau local (port 502), sans cloud : températures, états, défaut et codes, circuits 1 à 4, eau chaude, second générateur. Sur la pompe, réglez Utilisateur > Réglages > Modbus TCP sur « Marche » avec Gladys dans le réseau autorisé, saisissez ici son adresse IP, enregistrez, puis ajoutez-la depuis l’onglet Découverte. Le module Modbus séparé de Weishaupt n’est pas pris en charge. Modes, consignes et charge forcée ne changent que si vous autorisez les commandes ci-dessous ; eau chaude jamais au-dessus du plafond ci-dessous (65 °C au plus). La veille, celle d’un circuit et l’arrêt de la charge forcée ne dépendent jamais de cette option (voir le guide pour les cas d’échec). Le Modbus TCP n’a pas de mot de passe : gardez la pompe sur un réseau de confiance. Jamais testé avec un vrai appareil. Sans lien avec Weishaupt."
       },
       "links": [
         {
@@ -83,8 +83,8 @@
         "fr": "Circuits de chauffage"
       },
       "description": {
-        "en": "The numbers of the heating circuits of your installation, 1 to 5, separated by commas (for example 1, 2).",
-        "fr": "Les numéros des circuits de chauffage de votre installation, de 1 à 5, séparés par des virgules (par exemple 1, 2)."
+        "en": "The numbers of the heating circuits of your installation, 1 to 4, separated by commas (for example 1, 2).",
+        "fr": "Les numéros des circuits de chauffage de votre installation, de 1 à 4, séparés par des virgules (par exemple 1, 2)."
       },
       "placeholder": {
         "en": "1",
@@ -101,8 +101,8 @@
         "fr": "Autoriser les commandes"
       },
       "description": {
-        "en": "Off by default. On: Gladys may change the system operating mode, the mode of a heating circuit, the room setpoints of a circuit (comfort, normal, setback: 16 to 28 °C), the hot water setpoints (5.5 °C to the ceiling below, 60 °C at most) and start a hot water push. Off: these commands are refused. Standby, a circuit standby and stopping the hot water push never depend on this option.",
-        "fr": "Désactivé par défaut. Activé : Gladys peut changer le mode de fonctionnement du système, le mode d’un circuit de chauffage, les consignes ambiantes d’un circuit (confort, normale, réduite : 16 à 28 °C), les consignes d’eau chaude (5,5 °C jusqu’au plafond ci-dessous, 60 °C au plus) et lancer une charge d’eau chaude forcée. Désactivé : ces commandes sont refusées. La veille, la veille d’un circuit et l’arrêt de la charge forcée ne dépendent jamais de cette option."
+        "en": "Off by default. On: Gladys may change the system operating mode, the mode of a heating circuit, the room setpoints of a circuit (comfort, normal, setback: 16 to 28 °C), the hot water setpoints (5.5 °C to the ceiling below) and start a hot water push. Off: these commands are refused. Standby, a circuit standby and stopping the hot water push never depend on this option.",
+        "fr": "Désactivé par défaut. Activé : Gladys peut changer le mode de fonctionnement du système, le mode d’un circuit de chauffage, les consignes ambiantes d’un circuit (confort, normale, réduite : 16 à 28 °C), les consignes d’eau chaude (5,5 °C jusqu’au plafond ci-dessous) et lancer une charge d’eau chaude forcée. Désactivé : ces commandes sont refusées. La veille, la veille d’un circuit et l’arrêt de la charge forcée ne dépendent jamais de cette option."
       },
       "required": false,
       "default": false
@@ -115,8 +115,8 @@
         "fr": "Plafond d’eau chaude (°C)"
       },
       "description": {
-        "en": "The highest hot water setpoint Gladys may send, 30 to 65 °C (65 °C by default; the heat pump itself stops at 60 °C). Nothing above 65 °C is ever sent, whatever is typed here.",
-        "fr": "La consigne d’eau chaude la plus haute que Gladys peut envoyer, de 30 à 65 °C (65 °C par défaut ; la pompe elle-même s’arrête à 60 °C). Rien au-dessus de 65 °C n’est jamais envoyé, quoi qu’il soit saisi ici."
+        "en": "The highest hot water setpoint Gladys may send, 30 to 65 °C (65 °C by default). Nothing above 65 °C is ever sent, whatever is typed here. The heat pump also refuses more than its own hot water maximum (installer setting, 60 °C from the factory).",
+        "fr": "La consigne d’eau chaude la plus haute que Gladys peut envoyer, de 30 à 65 °C (65 °C par défaut). Rien au-dessus de 65 °C n’est jamais envoyé, quoi qu’il soit saisi ici. La pompe refuse aussi plus que sa propre température maximale d’eau chaude (réglage installateur, 60 °C d’usine)."
       },
       "required": false,
       "default": 65,

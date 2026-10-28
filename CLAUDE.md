@@ -54,15 +54,15 @@ test/kit/                 virtual and real clocks, fake TCP server (from gladys-
   `src/constants.js`, manifest keys (`host`, `unit_id`, `circuits`,
   `allow_commands`, `dhw_max_temperature`, `poll_interval`, `language`, the
   action `test_connection`).
-- **Registers from the list of weishaupt_modbus only** (Weishaupt's datapoint
-  list): a read covers documented registers of its table only, five at most
+- **Registers from Weishaupt's datapoint list 83807301 only** in the core
+  blocks (41x04, only in weishaupt_modbus, read apart and optional): a read
+  covers listed registers of its table only, five at most
   (`test/protocol.test.js`, the fake refuses the rest).
 - **One Modbus connection at a time, one request at a time**: everything goes
   through `useLine`; commands take the line from a poll, stops from anything.
 - **Commands**: never a switch or a writable binary; refused unless
   `allow_commands` (checked on arrival and in `beforeSend`); bounded on
-  arrival and in `beforeSend`; hot water never above 60 °C nor the ceiling
-  nor 65 °C (also in `writeRequest`); setpoint order kept on a fresh read;
+  arrival and in `beforeSend`; hot water never above the ceiling nor 65 °C (also in `writeRequest`); setpoint order kept on a fresh read;
   confirmed only by the echo and a read back equal to the value asked; EEPROM
   quota; never retried; refused while a stop is held.
 - **Stops** (`standby` of 40001 and 41x03, `off` of 42102): never behind the

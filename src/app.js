@@ -33,8 +33,9 @@
 //     may not show yet);
 //   - refused while a stop sent to the heat pump is held (not confirmed),
 //     except a new choice on the very register of that stop;
-//   - at most LIMITS.eepromWritesPerHour writes per register and hour (the
-//     heat pump keeps them in EEPROM), never for a lower setpoint;
+//   - at most LIMITS.eepromWritesPerHour writes per register and hour and
+//     LIMITS.eepromWritesPerDay per 24 h, kept in /data (the heat pump keeps
+//     them in EEPROM: 100,000 writes in its life), never for a lower setpoint;
 //   - one at a time, in their order of arrival (a scene setting several
 //     values sets them all, one after the other on the same connection);
 //     confirmed only by the echo of the write and a read back equal to the
@@ -65,6 +66,7 @@ import { DEVICE_TRANSPORTS, createLogger } from '@gladysassistant/integration-sd
 import { addressKey, normalizeConfig } from './config.js';
 import {
   BOUNDS,
+  DAY,
   HOUR,
   ILLEGAL_DATA_ADDRESS,
   LIMITS,
@@ -217,6 +219,13 @@ export class WeishauptApp {
           return;
         }
         this.memory = normalizeMemory(result?.data ?? null, this.now());
+        // The writes of the last 24 h (wall times in /data) back on the monotonic clock.
+        for (const [register, list] of Object.entries(this.memory.writes)) {
+          this.writes.set(
+            Number(register),
+            list.map((t) => this.mono() - (this.now() - t)),
+          );
+        }
       })();
     }
     return this.memoryLoaded;
@@ -1279,6 +1288,8 @@ export class WeishauptApp {
       return this.refusal(ERRORS.notSent(reason));
     }
     if (state.refused) {
+      // Not applied: it can no longer land after a stop.
+      this.guards.delete(plan.command.read);
       this.logger.warn(`Weishaupt: command refused by the heat pump (${what}): ${reason}`);
       return this.refusal(ERRORS.refused(reason));
     }
@@ -1327,12 +1338,33 @@ export class WeishauptApp {
     }
   }
 
-  /** Writes of the last hour to `register` (EEPROM), the old ones forgotten. */
-  recentWrites(register) {
-    const since = this.mono() - HOUR;
+  /** Writes of the last 24 h to `register` (EEPROM, monotonic times), the older ones forgotten. */
+  dayWrites(register) {
+    const since = this.mono() - DAY;
     const list = (this.writes.get(register) ?? []).filter((t) => t > since);
     this.writes.set(register, list);
     return list;
+  }
+
+  /** Writes of the last hour to `register`. */
+  recentWrites(register) {
+    const since = this.mono() - HOUR;
+    return this.dayWrites(register).filter((t) => t > since);
+  }
+
+  /**
+   * A command written to `register` (synchronous, in `beforeSend`): counted,
+   * and kept in /data (wall times) so a restart does not reset the daily
+   * budget of the EEPROM.
+   */
+  noteWrite(register, at) {
+    this.dayWrites(register).push(at);
+    const writes = {};
+    for (const [r, list] of this.writes) {
+      if (list.length > 0) writes[r] = list.map((t) => Math.round(this.now() - (this.mono() - t)));
+    }
+    this.memory.writes = writes;
+    this.saveMemory().catch(() => {});
   }
 
   async commandSession(session, job) {
@@ -1387,6 +1419,10 @@ export class WeishauptApp {
     if (!lower && recent.length >= LIMITS.eepromWritesPerHour) {
       throw this.refusal(ERRORS.quota(recent.length));
     }
+    const day = this.dayWrites(command.address);
+    if (!lower && day.length >= LIMITS.eepromWritesPerDay) {
+      throw this.refusal(ERRORS.quotaDay(day.length));
+    }
     const request = writeRequest(command.address, command.type, plan.written);
     this.logger.info(`Weishaupt: ${plan.role} (${plan.written})`);
     const sendBy = this.mono() + TIMINGS.commandMinSend + TIMINGS.commandMinRead;
@@ -1402,7 +1438,15 @@ export class WeishauptApp {
           const at = this.mono();
           this.lastSentAt = at;
           this.lastWriteAt.set(command.address, at);
-          this.recentWrites(command.address).push(at);
+          this.noteWrite(command.address, at);
+          // Marked at once: a stop clicked while this write is on its way holds against it.
+          this.guards.set(command.read, {
+            from: fresh,
+            expected: plan.expected,
+            moved: false,
+            until: at + TIMINGS.guard,
+            register: command.address,
+          });
           // A newer command for this register left: an older stop is never sent again after it.
           this.dropStopGuard(command.address);
         },
@@ -1520,7 +1564,7 @@ export class WeishauptApp {
             await this.sendStop(job);
           } catch (err) {
             this.logger.warn(`Weishaupt: stop failed: ${err.message}`);
-            job.resolve({ error: this.refusal(ERRORS.notSent(errorReason(err))) });
+            job.resolve({ error: this.refusal(ERRORS.stopNotSent(errorReason(err))) });
           }
           this.stops.shift();
         }
@@ -1540,14 +1584,19 @@ export class WeishauptApp {
    * clicked before any read), the first value read after the stop is taken
    * as that value: an unknown value never counts as "changed elsewhere". A
    * stop written is sent again only once the heat pump had the time to apply
-   * it (20 s): three times, then once every 10 minutes at most while the
-   * value of before still shows; a stop that never left is tried again at
-   * every check. Never 'drop' by the time.
+   * it (20 s), three times at most per click (the EEPROM of the heat pump
+   * takes 100,000 writes in its life): after that the stop stays held (the
+   * other commands refused) without writing, until a read shows it, a click
+   * or a change made at the heat pump; a stop that never left is tried again
+   * at every check. Never 'drop' by the time. The values of before are only
+   * read after the click (never the memory of an older poll); a hot water
+   * push counts down, so any running push is one value ("running").
    */
-  decideStop(stop, value, readStartedAt) {
-    if (value === undefined) {
+  decideStop(stop, raw, readStartedAt) {
+    if (raw === undefined) {
       return 'wait';
     }
+    const value = stop.classOf(raw);
     if (value === stop.stopValue) {
       stop.others = 0;
       return stop.sticky && this.mono() < stop.stickyUntil ? 'wait' : 'done';
@@ -1562,11 +1611,27 @@ export class WeishauptApp {
       return stop.others >= TIMINGS.stopOtherReads ? 'drop' : 'wait';
     }
     stop.others = 0;
-    if (!stop.written || stop.reasserts < TIMINGS.stopReasserts) {
-      return 'resend';
+    return !stop.written || stop.reasserts < TIMINGS.stopReasserts ? 'resend' : 'wait';
+  }
+
+  /**
+   * A command to the register of a stop, written and not confirmed, may still
+   * land after the stop: its value counts as a value of before and the stop
+   * stays held while it can land. Checked once the stop holds the line (a
+   * command cut by the stop has marked its write by then: synchronously in
+   * its `beforeSend`).
+   */
+  notePending(guard, plan) {
+    const pending = this.guardActive(plan.command.read)
+      ? this.guards.get(plan.command.read)
+      : undefined;
+    if (!pending) return;
+    const value = guard.classOf(pending.expected);
+    if (value !== plan.expected && !guard.before.includes(value)) {
+      guard.before.push(value);
     }
-    const last = stop.lastWriteAt ?? stop.sentAt;
-    return last === undefined || readStartedAt >= last + TIMINGS.stopSlowResend ? 'resend' : 'wait';
+    guard.sticky = true;
+    guard.stickyUntil = Math.max(guard.stickyUntil ?? -Infinity, pending.until);
   }
 
   /**
@@ -1574,35 +1639,21 @@ export class WeishauptApp {
    * that alone confirms it. A refused connection, a closed connection, a
    * timeout or a wrong answer is tried again every 250 ms until 3 s after
    * the click (the write is idempotent). A new click renews the guard of
-   * its register: three resends again, the current value as a value of
-   * before.
+   * its register: three resends again. The value read back, when it is not
+   * the stop, is a value of before (read after the click).
    */
   async sendStop(job) {
     const { plan, target, register, state } = job;
     const retryUntil = Math.max(job.received, this.mono()) + TIMINGS.commandSendBy;
-    const known = sameTarget(target, this.target())
-      ? this.unit.values?.[plan.command.read]
-      : undefined;
-    // A command to this register, sent and not confirmed, may still land after the stop.
-    const pending = this.guardActive(plan.command.read)
-      ? this.guards.get(plan.command.read)
-      : undefined;
     const guard = this.ensureStopGuard(register, plan, target);
-    for (const value of [pending?.expected, known]) {
-      if (value !== undefined && value !== plan.expected && !guard.before.includes(value)) {
-        guard.before.push(value);
-      }
-    }
-    if (pending) {
-      guard.sticky = true;
-      guard.stickyUntil = Math.max(guard.stickyUntil ?? -Infinity, pending.until);
-    }
     // A new click renews the guard: fast checks and three resends again.
     guard.since = this.mono();
     guard.reasserts = 0;
     guard.others = 0;
     let back;
     const attempt = async (session) => {
+      // The line is ours: a command cut by this stop has marked its write by now.
+      if (this.stopGuards.get(register) === guard) this.notePending(guard, plan);
       const request = writeRequest(register, plan.command.type, plan.written);
       const echo = await session.request(request, {
         timeoutMs: Math.max(250, Math.min(TIMINGS.requestTimeout, retryUntil - this.mono())),
@@ -1642,6 +1693,9 @@ export class WeishauptApp {
     }
     const confirmed = back === plan.expected;
     const current = this.stopGuards.get(register);
+    if (current && back !== undefined && !confirmed && current.before.length === 0) {
+      current.before.push(current.classOf(back));
+    }
     if (current) {
       if (confirmed && !(current.sticky && this.mono() < current.stickyUntil)) {
         this.dropStopGuard(register);
@@ -1664,7 +1718,7 @@ export class WeishauptApp {
       const reason = errorReason(failure);
       this.logger.warn(`Weishaupt: stop ${plan.role} failed (${reason})`);
       if (!state.written) {
-        result = { error: this.refusal(ERRORS.notSent(reason)) };
+        result = { error: this.refusal(ERRORS.stopNotSent(reason)) };
       } else if (failure.kind === ERROR_KINDS.REFUSED && NOT_APPLIED_EXCEPTIONS.has(failure.code)) {
         result = { error: this.refusal(ERRORS.refused(reason)) };
       } else {
@@ -1782,6 +1836,7 @@ export class WeishauptApp {
     if (!guard || !sameTarget(guard.target, target)) {
       if (guard) this.dropStopGuard(register);
       guard = {
+        classOf: plan.command.beforeKey ?? ((value) => value),
         readKey: plan.command.read,
         stopValue: plan.expected,
         target,

@@ -4,14 +4,14 @@ This integration shows your Weishaupt heat pump in Gladys through its **built-in
 interface on your local network, without any cloud. If you allow it, it can also change the modes
 and setpoints and start a hot water push.
 
-> **Never tested with a real device.** The integration follows the register list Weishaupt gave to
-> the users of the Home Assistant integration `weishaupt_modbus` (as kept in that project), and was
-> tested against a simulated heat pump only. Not affiliated with Weishaupt.
+> **Never tested with a real device.** The integration follows Weishaupt's datapoint list "Modbus TCP
+> (WWP)" 83807301 (1/2025-11) and the Home Assistant integration `weishaupt_modbus`, and was tested
+> against a simulated heat pump only. Not affiliated with Weishaupt.
 
 ## What you need
 
-- A Weishaupt heat pump whose controller has **Modbus TCP built in** (WBB and other recent models,
-  depending on the software of the controller). Heat pumps that only offer the **separate Weishaupt
+- A Weishaupt heat pump whose controller has **Modbus TCP built in**: WAB, WBB, WSB or WGB, with a
+  recent controller software (Weishaupt: a missing data point may need a software update). Heat pumps that only offer the **separate Weishaupt
   Modbus module** are **not supported** (another product, another register map). The Weishaupt WEM
   portal (cloud) is not used.
 - **Modbus TCP enabled** on the heat pump: "User" → "Settings" → "Modbus TCP", "Parameter: On", and
@@ -27,7 +27,7 @@ and setpoints and start a hot water push.
 | --------------------------- | ------------------------------------------------------------------------------ |
 | IP address of the heat pump | IPv4 or host name, port 502 unless you add one (`192.168.1.60:502`).           |
 | Modbus unit id              | 1.                                                                             |
-| Heating circuits            | The numbers of your circuits, 1 to 5, separated by commas (`1` by default).    |
+| Heating circuits            | The numbers of your circuits, 1 to 4, separated by commas (`1` by default).    |
 | Allow the commands          | Off by default (see below).                                                    |
 | Hot water ceiling (°C)      | The highest hot water setpoint Gladys may send: 65 °C by default, 30 to 65 °C. |
 | Refresh interval            | 60 s by default, 30 s to 1 h.                                                  |
@@ -41,19 +41,20 @@ heat pump again, never more often than the interval.
 - System operating mode (automatic, heating, cooling, summer, standby, second heat generator), system
   state and heat pump state (heating, hot water, defrost, standby, utility lock, frost protection…, as
   stable texts such as `heating`, `hot-water`, `defrost`).
-- Fault (0/1), error code and warning code (`none`, or the code number as a text: look it up in the
-  manual of the heat pump).
-- Power demand (%), temperatures: outdoor, air intake, heat pump flow and return, evaporation,
-  compressor suction gas, hydraulic switch, hot water and hot water target in force.
-- Hot water setpoints (normal, setback) and hot water push (off, or 5 to 235 minutes).
+- Fault (0/1, register 33102), error code and warning code (`none`, or the code number as a text:
+  look it up in the manual of the heat pump).
+- Power demand (%), temperatures: outdoor 1 and 2, heat pump flow and return, hydraulic switch,
+  regenerative, buffer tank, total flow (B7), hot water and hot water target in force.
+- Hot water setpoints (normal, setback) and hot water push (off, or 5 to 240 minutes left).
 - Second heat generator and electric heaters 1 and 2 (on/off), when the heat pump gives them.
 - For each configured circuit: mode, party/pause (`automatic`, `pause-90-min`, `party-60-min`…),
   room setpoints (comfort, normal, setback), room temperature and humidity, room target in force,
   flow and flow target temperatures.
 
 A feature shows once a value of it was read. The special values are never published as measures:
-"no sensor" (0x8000) and "sensor broken" (0x8001) on a temperature, 0xFFFF on a percentage, a state
-outside its list, a value out of range. A text (state, code) is never published as a number.
+"no sensor", "open", "short circuit" and the digital states of a sensor, "no setpoint demand" (1 or
+-32768) on a setpoint, 0xFFFF on a percentage, a state outside its list, a value out of range. A text
+(state, code) is never published as a number.
 
 Not shown: the energy statistics of the heat pump (kWh per day, month and year: they restart at each
 period, they are not a meter index), the heat output computed by `weishaupt_modbus` from a power map
@@ -67,10 +68,11 @@ Off by default. With "Allow the commands", Gladys may change:
 - the mode of a configured circuit (automatic, comfort, normal, setback);
 - the room setpoints of a circuit (comfort, normal, setback), 16 to 28 °C by 0.5 °C, keeping comfort
   ≥ normal ≥ setback as read on the heat pump just before;
-- the hot water setpoints (normal, setback), 5.5 °C to the lowest of 60 °C (the heat pump), the
-  ceiling of the configuration and 65 °C, by 0.5 °C, keeping normal ≥ setback. **Nothing above 65 °C
-  is ever sent**, whatever is typed;
-- the hot water push (5 to 235 minutes).
+- the hot water setpoints (normal, setback), 5.5 °C up to the ceiling of the configuration (65 °C by
+  default), by 0.5 °C, keeping normal ≥ setback. **Nothing above 65 °C is ever sent**, whatever is
+  typed. The heat pump refuses a setpoint above its own hot water maximum (installer setting, 60 °C
+  from the factory): Gladys then answers "refused";
+- the hot water push (5 to 240 minutes, by 5).
 
 Each command first reads the current values on the heat pump, writes nothing when it is already
 right, then reads the written value back: it succeeds only when the read back shows the value asked.
@@ -82,8 +84,9 @@ the value is out of range, above the ceiling or breaks the order of the setpoint
 in the configuration, the current values could not be read, the configuration changed meanwhile, a
 stop was sent after it arrived, a stop sent to this heat pump is not confirmed yet (only a new choice
 on that very setting goes then), 16 commands are already waiting, or this setting was already changed
-6 times in the last hour. That last limit protects the memory of the heat pump, which keeps these
-settings with limited write cycles; it never applies to a lower setpoint nor to a stop.
+6 times in the last hour or 20 times in the last 24 hours (kept across a restart). These limits
+protect the memory of the heat pump, which keeps these settings in an EEPROM of 100,000 writes for
+its whole life (Weishaupt); they never apply to a lower setpoint nor to a stop.
 
 The commands go one at a time, in their order of arrival, on one connection. A scene setting several
 values sets them all: a command still waiting its turn after 3.5 s gets the answer "waiting" and goes
@@ -101,8 +104,9 @@ A stop not confirmed is **held** in `/data` (with the value of before) until a r
 not dropped after some time. The integration checks the heat pump every 15 s for 3 minutes, then
 every minute, whatever the refresh interval: a stop that could not leave is tried again at each
 check; a stop written but not shown yet is sent again while the heat pump still shows the value of
-before (at least 20 s after the last write; three times, then once every 10 minutes at most, each one
-a write in the memory of the heat pump). A check never interrupts a command; a new click on a stop
+before (at least 20 s after the last write, three times at most per click: each one is a write in
+the memory of the heat pump). After that the stop stays held without writing until a read shows it,
+a new click or a change at the heat pump. A check never interrupts a command; a new click on a stop
 interrupts a check and is written and read back like any click. After a restart, the check runs at once,
 before even reading the configuration. Stops are never limited by the hourly quota of the commands.
 
@@ -130,7 +134,11 @@ Gladys never starts the heat pump again by itself.
 - No serial number over Modbus: the device is tied to the integration, not to the IP address
   (changing the address keeps the device and its history), and another Modbus device at the same
   address would not be detected.
-- The register list comes from `weishaupt_modbus`; Weishaupt's own shared copy is no longer public,
-  so it could not be read again for the current software. The time a written value takes to show
-  is not documented (the integration allows 20 s before sending a stop again).
+- The registers are those of Weishaupt's list 83807301 (1/2025-11); the party/pause of a circuit
+  (41x04) only comes from `weishaupt_modbus` and is read apart, without failing the read when the
+  heat pump does not serve it. The list warns that some Modbus software shifts the addresses by one:
+  the integration sends them as listed, as `weishaupt_modbus` does. The time a written value takes
+  to show is not documented (the integration allows 20 s before sending a stop again).
+- Register 30005 ("Fehlerfrei") is read but not shown: Weishaupt and `weishaupt_modbus` disagree on
+  its format; the fault comes from register 33102.
 - Two Modbus clients at once (Home Assistant and Gladys) may not be accepted by the heat pump.
