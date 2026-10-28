@@ -146,3 +146,8 @@ to date at the end of every milestone.
   out per the lot rules). Category: `climate` (no energy feature in v1).
 - Neighbour modules: gladys-idm (structure, line, stops, store, tests),
   gladys-lambda-heat-pump (held stops of lot 17) read only.
+
+## Next patch
+
+- r3 minor: the cap of 24 registers kept when /data is read back (`src/store.js:164`) has no test; a mutant
+  removing it survives. Only a hand-made /data reaches it.
