@@ -1,6 +1,6 @@
 {
   "name": "gladys-weishaupt",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for Weishaupt heat pumps with built-in Modbus TCP: temperatures, state, faults, heating circuits, hot water; optional mode and setpoint commands, capped hot water setpoint, stops never held back. Unofficial, not affiliated with Weishaupt.",
   "type": "module",

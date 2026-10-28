@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-28
+
 ### Added
 
 - Weishaupt heat pumps with a built-in Modbus TCP interface (WAB, WBB, WSB, WGB), read over the
@@ -26,3 +28,6 @@ the notes of the version's GitHub Release.
   not confirmed is held until a read shows it (never by the time), sent again three times at most
   per click, also after a restart; a command written just before it never wins over it.
 - "Test the connection" button, docs in English and French, cover image.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-weishaupt/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-weishaupt/releases/tag/v0.1.1
