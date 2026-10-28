@@ -29,7 +29,9 @@ import {
 } from './constants.js';
 
 export const STATE_FILE = '/data/weishaupt-state.json';
-const MAX_BYTES = 8 * 1024;
+// The largest memory written (8 stops with 253-character hosts, 20 registers x
+// 20 writes) is about 10 KiB: 32 KiB leaves room (test/config.test.js).
+export const MAX_BYTES = 32 * 1024;
 const MAX_STOPS = 8;
 
 export function fileStore(path = STATE_FILE) {
@@ -44,7 +46,7 @@ export function fileStore(path = STATE_FILE) {
       } catch (err) {
         return err?.code === 'ENOENT' ? { data: null } : { unreadable: true };
       }
-      if (text.length > MAX_BYTES) return { unreadable: true };
+      if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) return { unreadable: true };
       try {
         return { data: JSON.parse(text) };
       } catch {
@@ -159,7 +161,7 @@ export function normalizeMemory(raw, now) {
   // The command writes of the last 24 h (EEPROM budget), per holding register.
   const writes = {};
   const rawWrites = data.writes && typeof data.writes === 'object' ? data.writes : {};
-  for (const [key, list] of Object.entries(rawWrites).slice(0, 64)) {
+  for (const [key, list] of Object.entries(rawWrites).slice(0, 24)) {
     const register = Number(key);
     if (!Number.isInteger(register) || register < 40001 || register > 49999) continue;
     if (!Array.isArray(list)) continue;

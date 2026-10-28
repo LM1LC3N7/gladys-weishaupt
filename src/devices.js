@@ -96,6 +96,16 @@ const roomTarget = {
   keep_history: true,
 };
 
+/**
+ * A running push as one of the choices offered (by 5 minutes): the minutes
+ * left rounded up ("27-min" is shown "30-min"), so the select always shows a
+ * choice. Only the state published: the commands read the exact minutes.
+ */
+export function pushChoice(value) {
+  const match = /^(\d+)-min$/.exec(value);
+  return match ? `${Math.min(240, Math.ceil(Number(match[1]) / 5) * 5)}-min` : value;
+}
+
 /** The device features (not per circuit), by role, in display order; `value`: the key read. */
 const DEVICE_FEATURES = [
   [F.SYSTEM_MODE, select, 'systemMode', true],
@@ -121,7 +131,7 @@ const DEVICE_FEATURES = [
   [F.TEMP_DHW_TARGET, temperature, 'dhwTarget'],
   [F.DHW_SETPOINT, dhwTarget, 'dhwNormal', true],
   [F.DHW_SETBACK, dhwTarget, 'dhwSetback', true],
-  [F.DHW_PUSH, select, 'dhwPush', true],
+  [F.DHW_PUSH, select, 'dhwPush', true, pushChoice],
   [F.SECOND_GENERATOR, binary, 'secondGenerator'],
   [F.E1, binary, 'e1'],
   [F.E2, binary, 'e2'],
@@ -153,9 +163,9 @@ const CIRCUIT_DEFS = [
 
 /** Every known role: { definition, value key, always, circuit?, suffix? }, in display order. */
 export const ROLES = new Map([
-  ...DEVICE_FEATURES.map(([role, definition, value, always = false]) => [
+  ...DEVICE_FEATURES.map(([role, definition, value, always = false, present]) => [
     role,
-    { definition, value, always },
+    { definition, value, always, present },
   ]),
   ...CIRCUITS.flatMap((circuit) =>
     CIRCUIT_DEFS.map(([suffix, definition, value, always = false]) => [
@@ -376,7 +386,9 @@ export function deviceStates(i, values) {
     if (value === undefined) continue;
     const id = i.feature(role);
     if (entry.definition.category === C.TEXT) {
-      if (typeof value === 'string') states.push({ device_feature_external_id: id, text: value });
+      if (typeof value === 'string') {
+        states.push({ device_feature_external_id: id, text: entry.present?.(value) ?? value });
+      }
     } else if (typeof value === 'number' && Number.isFinite(value)) {
       states.push({ device_feature_external_id: id, state: value });
     }

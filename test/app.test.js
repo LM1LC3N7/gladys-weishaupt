@@ -1162,3 +1162,43 @@ test('r1-I1 a party/pause register not served never fails the poll', async (t) =
   assert.equal(ctx.state('circuit-1-mode').text, 'automatic');
   assert.equal(ctx.state('circuit-1-party-pause'), undefined);
 });
+
+// --- Review r2 -------------------------------------------------------------------
+
+for (const variant of ['second write not applied', 'unreachable at the second click']) {
+  test(`r2-B1 a new click takes its own values of before (${variant})`, async (t) => {
+    const ctx = await setup({ config: { host: HOST, poll_interval: 300 } });
+    t.after(ctx.stop);
+    ctx.hp.ignoreWrites = true;
+    await ctx.press('system-mode', 'standby');
+    assert.deepEqual(ctx.app.stopGuards.get(SYSTEM).before, ['automatic']);
+    ctx.hp.set(SYSTEM, 1); // heating, set at the heat pump after click 1
+    await ctx.advance(3 * SECOND, 100);
+    if (variant === 'unreachable at the second click') ctx.hp.down = true;
+    await ctx.press('system-mode', 'standby');
+    assert.ok(
+      !ctx.app.stopGuards.get(SYSTEM).before.includes('automatic'),
+      'nothing kept from click 1',
+    );
+    ctx.hp.ignoreWrites = false;
+    ctx.hp.down = false;
+    await ctx.advance(3 * MINUTE, 200);
+    assert.equal(ctx.hp.get(SYSTEM), STANDBY, 'click 2 ends up applied');
+    assert.ok(
+      !ctx.lines.some((l) => /changed after the stop/.test(l)),
+      'never "changed elsewhere"',
+    );
+  });
+}
+
+test('r2-n2 a running push is published as the choice above it (27 min left: "30-min")', async (t) => {
+  const clock = testClock({ start: NOW });
+  const hp = fakeWeishaupt({ timers: clock.timers });
+  hp.set(PUSH, 27);
+  const ctx = await setup({ clock, hp });
+  t.after(ctx.stop);
+  assert.equal(ctx.state('dhw-push').text, '30-min');
+  const [device] = ctx.gladys.fake.discoveredDevices;
+  const push = device.features.find((f) => f.external_id === feature('dhw-push'));
+  assert.ok(push.supported_options.some((o) => o.value === '30-min'));
+});

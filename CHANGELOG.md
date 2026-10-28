@@ -20,7 +20,7 @@ the notes of the version's GitHub Release.
   temperature and humidity, flow temperatures).
 - Commands behind "Allow the commands" (off by default): system mode, circuit mode, room setpoints
   (comfort, normal, setback: 16-28 °C), hot water setpoints (5.5 °C to the configured ceiling,
-  65 °C at most) and hot water push (5-240 min), decided on a fresh read, confirmed by a read back,
+  65 °C at most) and hot water push (5-240 min, shown rounded up to the next 5 minutes), decided on a fresh read, confirmed by a read back,
   at most 6 changes per setting and hour and 20 per day (kept in /data).
 - Standby, a circuit standby and stopping the hot water push never depend on that option; a stop
   not confirmed is held until a read shows it (never by the time), sent again three times at most

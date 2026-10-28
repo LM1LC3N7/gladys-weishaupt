@@ -1,7 +1,10 @@
 import { test } from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { dhwCapOf, normalizeConfig, parseAddress, parseCircuits } from '../src/config.js';
-import { normalizeMemory } from '../src/store.js';
+import { MAX_BYTES, fileStore, normalizeMemory } from '../src/store.js';
 
 test('addresses: IPv4 or host name, optional port; never broadcast, multicast nor 0.x', () => {
   assert.deepEqual(parseAddress('192.168.1.60'), { host: '192.168.1.60', port: 502 });
@@ -130,4 +133,43 @@ test('/data: repaired and bounded; a stop is never dropped for its age; a click 
     stops: [],
     writes: {},
   });
+});
+
+test('r2-n1 the largest /data written is read back (never "unreadable" for its size)', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'weishaupt-data-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const now = Date.UTC(2026, 9, 28);
+  const host = `${'a'.repeat(63)}.`.repeat(3) + 'a'.repeat(61);
+  const registers = [40001, 42102, 42103, 42104];
+  for (let c = 0; c < 4; c += 1)
+    for (const a of [41103, 41105, 41106, 41107]) registers.push(a + c * 100);
+  const writes = Object.fromEntries(
+    registers.map((r) => [
+      r,
+      Array.from({ length: 20 }, (_, i) => now - 23 * 3_600_000 + i * 60_000),
+    ]),
+  );
+  const stops = [40001, 42102, 41103, 41203, 41303, 41403].map((register) => ({
+    host,
+    port: 65535,
+    unitId: 247,
+    register,
+    since: now - 1,
+    sentAt: now - 1,
+    reasserts: 3,
+    written: true,
+    before: register === 42102 ? ['running', 'off'] : ['second-generator', 'automatic'],
+  }));
+  const memory = normalizeMemory(
+    { lastAttemptAt: now, target: { host, port: 65535, unitId: 247 }, stops, writes },
+    now,
+  );
+  assert.equal(memory.stops.length, 6);
+  assert.equal(Object.keys(memory.writes).length, 20);
+  assert.ok(Buffer.byteLength(JSON.stringify(memory)) < MAX_BYTES / 2, 'room left');
+  const store = fileStore(join(dir, 'state.json'));
+  await store.save(memory);
+  const back = await store.load();
+  assert.equal(back.unreadable, undefined);
+  assert.deepEqual(normalizeMemory(back.data, now), memory);
 });

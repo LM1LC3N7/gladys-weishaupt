@@ -1646,7 +1646,10 @@ export class WeishauptApp {
     const { plan, target, register, state } = job;
     const retryUntil = Math.max(job.received, this.mono()) + TIMINGS.commandSendBy;
     const guard = this.ensureStopGuard(register, plan, target);
-    // A new click renews the guard: fast checks and three resends again.
+    // A new click renews the guard: fast checks and three resends again, and
+    // its own values of before (read after it: the values read after an
+    // earlier click say nothing of this one; review r2).
+    guard.before = [];
     guard.since = this.mono();
     guard.reasserts = 0;
     guard.others = 0;

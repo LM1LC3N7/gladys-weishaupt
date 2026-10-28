@@ -46,8 +46,8 @@ relit la pompe, jamais plus souvent que l’intervalle.
 - Demande de puissance (%), températures : extérieures 1 et 2, départ et retour de la pompe,
   bouteille de découplage, régénératif, ballon tampon, départ commun (B7), eau chaude et consigne
   d’eau chaude en cours.
-- Consignes d’eau chaude (normale, réduite) et charge d’eau chaude forcée (arrêt, ou 5 à 240 minutes
-  restantes).
+- Consignes d’eau chaude (normale, réduite) et charge d’eau chaude forcée (arrêt, ou les minutes
+  restantes arrondies au choix suivant par pas de 5 : 27 minutes restantes s’affichent « 30 min »).
 - Second générateur et résistances électriques 1 et 2 (marche/arrêt), quand la pompe les donne.
 - Pour chaque circuit configuré : mode, fête/pause (`automatic`, `pause-90-min`, `party-60-min`…),
   consignes ambiantes (confort, normale, réduite), température et humidité ambiantes, consigne

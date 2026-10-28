@@ -36,6 +36,11 @@ to date at the end of every milestone.
       one value of before); m3 circuits 1-4; m4 fault from 33102, 30005 read not
       shown; m5 "stop not sent yet, tried again"; m6 busy text. Tests named
       `r1-…`.
+- [x] **Review r2** (REFUSÉ, 2026-10-28): fixed in "Fix r2 review": a new click
+      empties the values of before (only reads after it count; B1 bis); /data
+      read up to 32 KiB, the largest memory written (~10 KiB) tested round trip
+      (n1); a running push published rounded up to the next choice by 5 minutes,
+      commands still on the exact minutes (n2). Tests named `r2-…`.
 - [ ] **Milestone 2 — real heat pump**: run against a real WBB (see "To check").
 - [ ] **Milestone 3 — more**: energy statistics (36xxx: kWh per day, month
       and year, restarting at each period: never as a meter index; perhaps the

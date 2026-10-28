@@ -45,7 +45,8 @@ heat pump again, never more often than the interval.
   look it up in the manual of the heat pump).
 - Power demand (%), temperatures: outdoor 1 and 2, heat pump flow and return, hydraulic switch,
   regenerative, buffer tank, total flow (B7), hot water and hot water target in force.
-- Hot water setpoints (normal, setback) and hot water push (off, or 5 to 240 minutes left).
+- Hot water setpoints (normal, setback) and hot water push (off, or the minutes left rounded up to
+  the next choice by 5 minutes: 27 minutes left show as "30 min").
 - Second heat generator and electric heaters 1 and 2 (on/off), when the heat pump gives them.
 - For each configured circuit: mode, party/pause (`automatic`, `pause-90-min`, `party-60-min`…),
   room setpoints (comfort, normal, setback), room temperature and humidity, room target in force,
